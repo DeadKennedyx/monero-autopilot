@@ -1,0 +1,131 @@
+/* Shared product branding: the same palette as moneroautopilot.com.
+   Load after the mainnet layout in both the desktop and isolated mainnet UI. */
+:root{
+  color-scheme:dark;
+  --canvas:#111214;--surface:#191a1d;--raised:#222326;--line:#303135;
+  --text:#f3efe9;--muted:#a6a5a6;--orange:#f26822;--accent:#ff9a60;
+  --success:#a5cfb9;--success-surface:#1b2b24;--warning:#efc18c;
+  --input:#131416;--input-line:#76717a;
+  font-family:'Segoe UI Variable','Segoe UI',Arial,sans-serif;
+  font-size:15px;color:var(--text);background:var(--canvas);
+}
+body{background:var(--canvas);color:var(--text)}
+h1,h2,h3,.mainnet-shell .logo,.lock-brand{color:var(--text)}
+.card{background:var(--surface);border-color:var(--line)}
+.mainnet-shell aside,.mainnet-shell .content header{background:#151618;border-color:var(--line)}
+.mainnet-shell .content header>div{align-items:center}
+.logo>svg,.brand-icon{background:var(--orange);color:#fff}
+.mainnet-shell nav button{color:var(--muted)}
+.mainnet-shell nav button:hover:not([aria-current]){background:var(--raised);color:var(--text)}
+.mainnet-shell nav button[aria-current]{background:#f268221c;color:var(--accent)}
+.aside-note,.aside-note>strong,.content footer{color:var(--muted)}
+.eyebrow{color:var(--accent)}
+.subtitle,.muted,.field-note,.fine-print,.helpful p,.helpful ol,.helpful li,
+.setting-row p,.security-intro,.security-help,.lock-policy,.send-pin-note,
+.mainnet-shell .muted,.mainnet-shell .field-note,.mainnet-shell .fine-print,
+.mainnet-shell .helpful p,.mainnet-shell .helpful ol{color:var(--muted)}
+.mainnet-shell .field-note,.mainnet-shell .fine-print{font-size:12px}
+.test-pill{background:#f2682215;border-color:#f2682255;color:var(--accent)}
+.button{background:var(--orange);color:#17110d;border-color:transparent;font-size:13px}
+.button:hover:not(:disabled){background:#ff833f;color:#17110d}
+.button.secondary{background:var(--raised);border-color:#565258;color:var(--text)}
+.button.secondary:hover:not(:disabled){background:#303135;color:var(--text)}
+.text-button,.icon-button{color:var(--accent)}
+.text-button:hover:not(:disabled),.icon-button:hover:not(:disabled){color:#ffc09a}
+.section-title,.setting-row,.soft-note,.transaction,.security-settings form{border-color:var(--line)}
+.icon-circle,.lock-symbol{background:#f2682218;color:var(--accent)}
+.tag{background:#f2682218;color:var(--accent)}
+.tag.ready{background:var(--success-surface);color:var(--success)}
+.alert{background:#38241f;border-color:#84533f;color:#ffd0bd}
+.notice,.payment-wait{background:#2c241c;border-color:#725438;color:var(--warning)}
+.payment-wait p{color:inherit}
+.address{background:var(--input);border-color:#464349;color:#ecd8cb}
+.soft-note,.empty,.empty p{color:var(--muted)}
+.empty h3,.setting-row strong{color:var(--text)}
+
+/* Calm connection progress, with green reserved for verified completion. */
+.mainnet-shell .wallet-progress{background:linear-gradient(125deg,#271d17,var(--surface) 70%);border-color:#5b4030}
+.progress-icon{background:#f268221b;color:var(--accent)}
+.progress-icon.is-working::after{border-color:#63422e;border-top-color:var(--orange)}
+.progress-copy p,.elapsed,.connection-steps li,.connection-steps small,
+.progress-reassurance,.progress-reassurance .progress-timing{color:var(--muted)}
+.progress-reassurance strong{color:var(--warning)}
+.connection-steps,.connection-details,.events li{border-color:var(--line)}
+.step-mark{background:var(--raised);border-color:#5c585f;color:#c8c4c1}
+.connection-steps .current{color:var(--accent)}
+.connection-steps .current .step-mark{background:var(--orange);border-color:var(--orange);color:#17110d}
+.connection-steps .complete{color:var(--success)}
+.connection-steps .complete .step-mark{background:var(--success-surface);border-color:#40634f;color:var(--success)}
+.connection-details,.connection-details dt,.connection-details summary,.address-details summary,
+.connection-details .events,.events,.scan-progress{color:var(--muted)}
+.connection-details dd{color:var(--text)}
+.mainnet-shell .wallet-progress.is-ready{background:linear-gradient(125deg,#1b2721,var(--surface) 78%);border-color:#3e5548}
+.is-ready .progress-icon{background:var(--success-surface);color:var(--success)}
+.mainnet-shell .wallet-progress.needs-attention{background:linear-gradient(125deg,#302319,var(--surface) 78%);border-color:#765235}
+.needs-attention .progress-icon{background:#553a23;color:var(--warning)}
+
+/* Keep exact amounts and payment review on neutral, readable surfaces. */
+.mainnet-shell .balance-card-mainnet{background:var(--surface);overflow:hidden}
+.balance-hero{margin:-28px -28px 0;padding:28px;background:linear-gradient(115deg,#00000038,#00000020),linear-gradient(125deg,#f26a23,#c34b13)}
+.mainnet-shell .balance-hero .eyebrow,.mainnet-shell .balance-hero .field-note,
+.mainnet-shell .balance-hero .balance,.mainnet-shell .balance-hero .balance small{color:#fffaf5}
+.mainnet-shell .balance-hero>.field-note{margin-bottom:0}
+.balance,.balance-breakdown dd{color:var(--text)}
+.balance small,.balance-breakdown dt,.balance-breakdown small{color:var(--muted)}
+.balance-breakdown{border-color:var(--line)}
+.balance-state{background:#34291d;color:var(--warning)}
+.balance-state.current{background:var(--success-surface);color:var(--success)}
+.balance-card-mainnet .unlock-note{color:var(--warning)}
+.owned-node>svg{color:var(--accent)}
+.mainnet-shell .send-main label,.pin-field label,.wallet-setup label{color:#d7cbc2}
+.mainnet-shell .available,.mainnet-shell .review-values,.mainnet-shell .send-pin-note,
+.amount-input>span{color:var(--muted)}
+.mainnet-shell .review-values strong{color:var(--text)}
+.review-values .total{border-color:var(--line)}
+.send-main textarea,.send-main input[type=text],.pin-field input,
+.mainnet-shell .send-main select,.wallet-setup input:not([type=checkbox]),.wallet-setup textarea{
+  color-scheme:dark;background:var(--input);border-color:var(--input-line);color:var(--text);
+}
+.send-main input::placeholder,.send-main textarea::placeholder,.pin-field input::placeholder,
+.wallet-setup input::placeholder,.wallet-setup textarea::placeholder{color:#a29da3}
+.confirm-check{color:#d7cbc2}.confirm-check input{accent-color:var(--orange)}
+.steps{color:var(--muted)}.steps .selected{color:var(--accent)}.steps i{background:var(--line)}
+.qr-area img{background:#fff;border-radius:12px;box-shadow:0 10px 30px #0004}
+.qr-placeholder,.receive-main>label{color:var(--muted)}
+.tabs{background:var(--input)}.tabs button{color:var(--muted)}
+.tabs .active{background:var(--raised);color:var(--accent);box-shadow:none}
+.transaction-icon,.transaction-icon.out{background:#f2682218;color:var(--accent)}
+.tx-name strong,.tx-value strong{color:var(--text)}
+.mainnet-shell .tx-name span,.mainnet-shell .tx-name details,.tx-value span,.tx-value small,
+.mainnet-shell .transaction-id,.payment-status p:not(.eyebrow),.payment-status code,
+.status-amount small{color:var(--muted)}
+
+/* Lock, recovery phrase, and setup share the product theme, too. */
+.lock-screen{background:radial-gradient(ellipse at top,#f2682216,transparent 60%),var(--canvas)}
+.lock-card{box-shadow:0 20px 70px #0004}
+.security-help{background:var(--input)}
+.wallet-setup{color:var(--text)}
+.wallet-setup .setup-intro,.wallet-setup .wallet-item div span,
+.wallet-setup .backup-callout p,.wallet-setup .backup-notes{color:var(--muted)}
+.wallet-setup .wallet-item{border-color:var(--line)}
+.wallet-setup .backup-callout{background:#f268220d;border:1px solid #6c452d}
+.wallet-setup .phrase-grid li{background:var(--raised);border-color:#464349}
+.wallet-setup .phrase-grid span{color:var(--accent)}
+.wallet-setup .phrase-grid b{color:var(--text)}
+.mainnet-startup p,.end p{color:var(--muted)}
+.mainnet-startup .card>svg,.startup-logo>svg{color:var(--accent)}
+.mainnet-startup .eyebrow{color:var(--accent)}
+.mainnet-startup p[role=alert]{color:var(--text)}
+.mainnet-shell button:focus-visible,button:focus-visible,a:focus-visible,input:focus-visible,
+textarea:focus-visible,select:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
+
+/* Pip is the same local SVG companion used by the original desktop UI. */
+.wallet-buddy{width:56px;height:53px;color:var(--orange);overflow:visible;flex-shrink:0}
+.buddy-float{animation:product-buddy-float 4s ease-in-out infinite;transform-origin:35px 35px}
+.buddy-eyes{animation:product-buddy-blink 6.5s infinite;transform-origin:35px 31px}
+.buddy-shadow{animation:product-buddy-shadow 4s ease-in-out infinite;transform-origin:35px 59px}
+@keyframes product-buddy-float{0%,100%{transform:translateY(1px) rotate(-2deg)}50%{transform:translateY(-3px) rotate(2deg)}}
+@keyframes product-buddy-blink{0%,42%,46%,100%{transform:scaleY(1)}44%{transform:scaleY(.12)}}
+@keyframes product-buddy-shadow{0%,100%{transform:scaleX(1)}50%{transform:scaleX(.83)}}
+@media(max-width:780px){.wallet-buddy{width:42px;height:42px}.mainnet-shell .content header>div{align-items:center}.balance-hero{margin:-20px -20px 0;padding:20px}}
+@media(prefers-reduced-motion:reduce){.buddy-float,.buddy-eyes,.buddy-shadow{animation:none!important}*{transition:none!important}}

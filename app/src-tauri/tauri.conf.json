@@ -1,0 +1,24 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Monero AutoPilot",
+  "version": "0.9.0",
+  "identifier": "com.moneroautopilot.wallet",
+  "build": { "frontendDist": "../web" },
+  "app": { "windows": [], "security": { "capabilities": [] } },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": ["icons/icon.ico"],
+    "publisher": "Monero AutoPilot",
+    "shortDescription": "Monero wallet with local keys and built-in Tor",
+    "licenseFile": "../../LICENSE",
+    "resources": {
+      "resources/monero/": "monero/",
+      "resources/licenses/": "licenses/"
+    },
+    "windows": {
+      "webviewInstallMode": { "type": "downloadBootstrapper", "silent": true },
+      "nsis": { "installMode": "currentUser", "languages": ["English"], "displayLanguageSelector": false, "startMenuFolder": "Monero AutoPilot" }
+    }
+  }
+}

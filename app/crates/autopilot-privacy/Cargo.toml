@@ -1,0 +1,32 @@
+[package]
+name = "autopilot-privacy"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Versioned privacy policy and fail-closed node routing for AutoPilot"
+
+[features]
+default = ["transport"]
+transport = ["dep:reqwest", "dep:tokio", "dep:tokio-util", "dep:rustls", "dep:webpki-roots", "dep:axum", "dep:digest_auth", "dep:subtle", "dep:zeroize"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+url = "2"
+sha3 = "0.10"
+data-encoding = "2"
+reqwest = { version = "0.13", optional = true, default-features = false, features = ["rustls", "socks", "json", "stream"] }
+tokio = { version = "1", optional = true, features = ["rt-multi-thread", "macros", "net", "time", "io-util", "sync"] }
+tokio-util = { version = "0.7", optional = true, features = ["rt"] }
+uuid = { version = "1", features = ["v4"] }
+rustls = { version = "0.23", optional = true, default-features = false, features = ["std", "tls12", "aws-lc-rs"] }
+webpki-roots = { version = "1", optional = true }
+axum = { version = "0.8", optional = true }
+digest_auth = { version = "0.3", optional = true }
+subtle = { version = "2.6", optional = true }
+zeroize = { version = "1", optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+rcgen = "0.14"
+tokio-rustls = "0.26"

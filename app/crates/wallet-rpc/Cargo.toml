@@ -1,0 +1,31 @@
+[workspace]
+
+[package]
+autobins = false
+name = "autopilot-wallet-lab"
+version = "0.3.0"
+edition = "2021"
+license = "MIT"
+description = "AutoPilot wallet RPC supervision and embedded Tor runtime"
+
+[dependencies]
+autopilot-privacy = { path = "../autopilot-privacy" }
+axum = "0.8"
+reqwest = { version = "0.13", default-features = false, features = ["json", "stream"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time", "sync", "signal", "process", "io-util", "fs"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+sha2 = "0.10"
+digest_auth = "0.3.1"
+zeroize = "1"
+fs2 = "0.4"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Cryptography", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Storage_FileSystem"] }
+
+[profile.release]
+opt-level = "s"
+strip = true
+
+[dev-dependencies]
+tempfile = "3"

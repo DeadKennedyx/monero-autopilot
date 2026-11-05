@@ -1,0 +1,20 @@
+[workspace]
+
+[package]
+name = "monero-autopilot"
+version = "0.9.0"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+autopilot-recovery-lab = { path = "../crates/wallet-runtime" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "time"] }
+tauri = { version = "2", features = [] }
+serde_json = "1"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[profile.release]
+opt-level = "s"
+strip = true
