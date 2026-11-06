@@ -17,6 +17,7 @@ use autopilot_wallet_lab::{
     LabResult, VERSION,
 };
 use monero_autopilot_core::local_recovery::{LocalRecovery, Phase};
+use monero_autopilot_core::wallet_liveness::{MissingResponse, WalletLiveness};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -538,6 +539,36 @@ fn connect_is_active(phase: &str, status: &PrivacyStatus) -> bool {
             ConnectionState::Disconnected | ConnectionState::PrivacyBlocked
         )
 }
+fn observed_wallet_height(value: &serde_json::Value, node_height: Option<u64>) -> Option<u64> {
+    value["height"].as_u64().filter(|height| {
+        *height <= 100_000_000 && node_height.is_none_or(|node| *height <= node.saturating_add(2))
+    })
+}
+fn wallet_observation(
+    node_ok: bool,
+    wallet_alive: bool,
+    wallet_responded: bool,
+    missing: MissingResponse,
+    remote_route: bool,
+) -> Option<bool> {
+    if !wallet_alive {
+        Some(false)
+    } else if !node_ok {
+        // The remote route has its own bounded recovery controller. Its outage
+        // must not be charged as a wallet responsiveness failure as well.
+        if remote_route {
+            None
+        } else {
+            Some(false)
+        }
+    } else if wallet_responded {
+        Some(true)
+    } else if missing == MissingResponse::Unresponsive {
+        Some(false)
+    } else {
+        None
+    }
+}
 pub struct Runtime {
     pub client: Client,
     task: Option<JoinHandle<()>>,
@@ -681,6 +712,7 @@ impl Runtime {
             receiver,
             cancel,
             policy: LocalRecovery::default(),
+            wallet_liveness: WalletLiveness::default(),
             state: Snapshot {
                 network: network.as_str(),
                 receive: receive_enabled.then(ReceiveSnapshot::default),
@@ -726,6 +758,7 @@ struct Actor {
     receiver: mpsc::Receiver<Request>,
     cancel: CancellationToken,
     policy: LocalRecovery,
+    wallet_liveness: WalletLiveness,
     state: Snapshot,
     clock: Instant,
     expected_identity: Option<String>,
@@ -1017,7 +1050,7 @@ impl Actor {
                     self.wait_for_private_route().await?;
                     if !self.remote_privacy() {
                         self.supervisor.start_node().await?;
-                        self.observe().await;
+                        let _ = self.observe().await;
                         self.state.last_issue = None;
                         self.state.wallet_status = "Choose or create a wallet".into();
                     }
@@ -1220,6 +1253,9 @@ impl Actor {
                 return;
             }
             Action::Send(command) => {
+                if let Some(payments) = &mut self.payments {
+                    payments.clear_action_error();
+                }
                 if matches!(&command, SendCommand::Prepare { .. }) {
                     if let Some(payments) = &mut self.payments {
                         payments.clear_rejected_fee();
@@ -1432,7 +1468,7 @@ impl Actor {
                     self.state.error =
                         Some("Stopped to preserve 10 GiB of free disk space.".into());
                 } else {
-                    self.observe().await;
+                    let _ = self.observe().await;
                     self.state.last_issue = None;
                     self.state.wallet_status = "Choose or create a wallet".into();
                 }
@@ -1447,6 +1483,7 @@ impl Actor {
             };
             let status = router.snapshot();
             if !status.operations_allowed {
+                self.policy.defer_observation();
                 if let Err(e) = result {
                     self.state.error = Some(e.message().into());
                 }
@@ -1470,7 +1507,13 @@ impl Actor {
             if self.supervisor.route_generation() != Some(status.recovery.generation)
                 && self.policy.phase == Phase::Monitoring
             {
-                self.policy.start(self.millis());
+                self.policy.reconnect(self.millis());
+                if self.policy.phase == Phase::Attention {
+                    self.stop_exhausted_wallet().await;
+                    self.state.error = Some("Repeated wallet restarts exhausted the recovery budget. Try again when the connection is stable.".into());
+                    self.publish().await;
+                    return;
+                }
             }
         }
         if self
@@ -1521,8 +1564,15 @@ impl Actor {
             return;
         }
         if matches!(self.policy.phase, Phase::Monitoring | Phase::Suspect) {
-            let healthy = self.observe().await;
-            if self.policy.observe(healthy, self.millis()) {
+            let observation = self.observe().await;
+            let restart = match observation {
+                Some(healthy) => self.policy.observe(healthy, self.millis()),
+                None => {
+                    self.policy.defer_observation();
+                    false
+                }
+            };
+            if restart {
                 self.operation("Failure confirmed. Saving and closing the old wallet connection")
                     .await;
                 if self.supervisor.wallet.is_some() && self.checkpoint().await.is_err() {
@@ -1533,13 +1583,13 @@ impl Actor {
                 self.client.busy.store(false, Ordering::SeqCst);
                 self.state.operation.clear();
                 if self.policy.phase == Phase::Attention {
-                    self.supervisor.stop_node().await;
+                    self.stop_exhausted_wallet().await;
                     self.state.error = Some("Repeated failures exhausted the restart budget. Explicit retry is required.".into());
                     self.event("Crash-loop limit reached; no more automatic restarts.");
                 } else {
                     self.event("Bounded recovery scheduled. Stop can cancel the pending retry.");
                 }
-            } else if healthy && Instant::now() >= self.next_save {
+            } else if observation == Some(true) && Instant::now() >= self.next_save {
                 if self.checkpoint().await.is_ok() {
                     self.event("Periodic wallet checkpoint saved.");
                 } else {
@@ -1576,6 +1626,22 @@ impl Actor {
             self.next_receive = Instant::now() + Duration::from_secs(5);
         }
         self.publish().await;
+    }
+    async fn stop_exhausted_wallet(&mut self) {
+        // Terminal attention must quiesce an old backend even if the route
+        // changed directly between two usable snapshots. Submitted payments
+        // retain their durable attempt markers; only unused previews expire.
+        if let Some(payments) = &mut self.payments {
+            if let Err(error) = payments.invalidate_previews() {
+                payments.set_error(error);
+            }
+        }
+        if self.supervisor.wallet.is_some() {
+            let _ = self.checkpoint().await;
+        }
+        self.supervisor.stop_node().await;
+        self.state.node_synced = false;
+        self.state.wallet_status = "Stopped".into();
     }
     async fn recover(&mut self) -> LabResult<()> {
         if let Some(receiver) = &mut self.test_wallet {
@@ -1653,10 +1719,14 @@ impl Actor {
         self.state.wallet_id = Some(identity[..12].to_owned());
         self.state.wallet_height = Some(height);
         self.state.wallet_sample_at = Some(unix_time());
-        if !self.observe().await {
+        if self.observe().await != Some(true) {
             return Err("Reopened processes did not pass their live health check.");
         }
         self.checkpoint().await?;
+        // auto_refresh starts work on Monero's next idle tick. Enable it only
+        // after every mandatory startup RPC has completed; normal observation
+        // already treats a refresh-busy wallet as alive rather than restarting it.
+        self.supervisor.resume_wallet_refresh().await?;
         self.next_receive = Instant::now();
         Ok(())
     }
@@ -1779,6 +1849,7 @@ impl Actor {
             self.supervisor.stop_node().await;
             self.supervisor.wallet_root = manager.active_root();
             self.expected_identity = None;
+            self.wallet_liveness = WalletLiveness::default();
             self.state.wallet_id = None;
             self.state.wallet_height = None;
             self.state.wallet_sample_at = None;
@@ -1831,7 +1902,12 @@ impl Actor {
             .ok_or("Test wallet is unavailable.")?
             .start_wallet_against(&daemon, true)
             .await?;
-        self.collect_test_recipient().await
+        self.collect_test_recipient().await?;
+        self.test_wallet
+            .as_ref()
+            .ok_or("Test wallet is unavailable.")?
+            .resume_wallet_refresh()
+            .await
     }
     async fn collect_test_recipient(&mut self) -> LabResult<()> {
         let rpc = &self
@@ -1858,7 +1934,7 @@ impl Actor {
         {
             return Err("Payment action cancelled while the connection changed.");
         }
-        if !self.observe().await {
+        if self.observe().await != Some(true) {
             return Err("The selected node is unavailable. Nothing new was sent.");
         }
         self.collect_receive().await?;
@@ -2011,6 +2087,23 @@ impl Actor {
         } else {
             receive::read_balance(&rpc, unix_time()).await?
         };
+        if let Some(pid) = self.supervisor.wallet_pid() {
+            let now = self.millis();
+            self.wallet_liveness
+                .bind(pid, self.supervisor.route_generation().unwrap_or(0), now);
+            self.wallet_liveness.responded(now);
+            if self.state.node_synced
+                && self
+                    .state
+                    .node_height
+                    .is_some_and(|height| balance.wallet_height >= height)
+                && self
+                    .privacy_status()
+                    .is_none_or(|status| status.operations_allowed)
+            {
+                self.wallet_liveness.synchronized(now);
+            }
+        }
         self.state.wallet_height = Some(balance.wallet_height);
         self.state.wallet_sample_at = Some(balance.sampled_at);
         if self.state.node_synced
@@ -2030,7 +2123,9 @@ impl Actor {
         data.error = None;
         Ok(())
     }
-    async fn observe(&mut self) -> bool {
+    /// None means a live wallet is temporarily busy. It must not count as a
+    /// healthy observation, earn restart budget, or immediately force a restart.
+    async fn observe(&mut self) -> Option<bool> {
         let (node_exit, wallet_exit) = self.supervisor.check_exits();
         if node_exit {
             self.event("The owned node exited unexpectedly.");
@@ -2086,11 +2181,22 @@ impl Actor {
             self.state.peers = 0;
         }
         let wallet_alive = self.supervisor.wallet.is_some();
+        if let Some(pid) = self.supervisor.wallet_pid() {
+            self.wallet_liveness.bind(
+                pid,
+                self.supervisor.route_generation().unwrap_or(0),
+                self.millis(),
+            );
+        }
+        let mut wallet_responded = false;
         if let Some(wallet) = &self.supervisor.wallet {
             match wallet.rpc.call("get_height", json!({}), 3).await {
-                Ok(value) if value["height"].as_u64().is_some() => {
-                    self.state.wallet_height = value["height"].as_u64();
+                Ok(value) if observed_wallet_height(&value, self.state.node_height).is_some() => {
+                    self.state.wallet_height =
+                        observed_wallet_height(&value, self.state.node_height);
                     self.state.wallet_sample_at = Some(unix_time());
+                    self.wallet_liveness.responded(self.millis());
+                    wallet_responded = true;
                     self.state.wallet_status = if self.state.node_synced
                         && self.state.wallet_height >= self.state.node_height
                     {
@@ -2107,16 +2213,27 @@ impl Actor {
         } else {
             self.state.wallet_status = "Stopped".into();
         }
-        // Long wallet refreshes can temporarily occupy RPC. A busy wallet alone
-        // is not proof of a node failure. Process exit is observable separately.
-        let healthy = node_ok && wallet_alive;
+        let missing = self.wallet_liveness.missing_response(self.millis());
         self.state.last_issue = if !node_ok {
             Some("The node connection is unavailable or its response is invalid.".into())
         } else if !wallet_alive {
             Some("The wallet backend is no longer running.".into())
+        } else if !wallet_responded && missing == MissingResponse::Unresponsive {
+            Some("The wallet has not responded for three minutes. Checking again before safely reopening it.".into())
+        } else if !wallet_responded && missing == MissingResponse::InitialScanNotice {
+            Some("The first scan has not answered for fifteen minutes. It may still be scanning; AutoPilot will keep checking. You can pause and resume the connection if it remains stuck.".into())
         } else {
             None
         };
-        healthy
+        // Initial scans continue without an automatic deadline-based kill.
+        // Foreground RPC actions are serialized by the actor, so this check
+        // never interrupts preparation, a broadcast, setup, or backup work.
+        wallet_observation(
+            node_ok,
+            wallet_alive,
+            wallet_responded,
+            missing,
+            self.remote_privacy(),
+        )
     }
 }

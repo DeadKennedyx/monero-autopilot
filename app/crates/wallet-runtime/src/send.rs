@@ -94,6 +94,8 @@ pub struct Sender {
     network: Network,
     records: Vec<Record>,
     pub snapshot: SendSnapshot,
+    // An explicit action's rejection must survive unrelated history refreshes.
+    action_error: Option<String>,
     failed: bool,
 }
 pub fn parse_amount(text: &str) -> LabResult<u64> {
@@ -156,6 +158,7 @@ impl Sender {
             network,
             records: vec![],
             snapshot: SendSnapshot::default(),
+            action_error: None,
             failed: false,
         };
         let loaded = if network == Network::Testnet {
@@ -278,8 +281,13 @@ impl Sender {
             });
     }
     pub fn set_error(&mut self, error: &str) {
+        self.action_error = Some(error.into());
         self.snapshot.error = Some(error.into());
         self.project();
+    }
+    pub fn clear_action_error(&mut self) {
+        self.action_error = None;
+        self.snapshot.error = None;
     }
     pub fn clear_rejected_fee(&mut self) {
         self.snapshot.rejected_fee = None;
@@ -314,7 +322,7 @@ impl Sender {
             return Err(e);
         }
         self.records[index].payment.status = "Cancelled".into();
-        self.snapshot.error = None;
+        self.clear_action_error();
         self.clear_rejected_fee();
         self.project();
         Ok(())
@@ -474,7 +482,7 @@ impl Sender {
             return Err(e);
         }
         self.records.push(record);
-        self.snapshot.error = None;
+        self.clear_action_error();
         self.project();
         Ok(())
     }
@@ -607,7 +615,7 @@ impl Sender {
                 if value["tx_hash"].as_str() == Some(self.records[i].payment.txid.as_str()) =>
             {
                 self.records[i].payment.status = "Pending".into();
-                self.snapshot.error = None;
+                self.clear_action_error();
             }
             _ => {
                 self.snapshot.error=Some("The broadcast outcome is uncertain. Checking the saved transaction; it will not be sent again automatically.".into());
@@ -686,9 +694,9 @@ impl Sender {
                 }
             }
         }
-        self.snapshot.error = uncertain.then(|| {
+        self.snapshot.error = self.action_error.clone().or_else(|| uncertain.then(|| {
             "Payment confirmation is not currently verified. Saved transaction evidence is retained; this payment will not be sent again automatically.".into()
-        });
+        }));
         self.project();
         Ok(())
     }
@@ -739,25 +747,35 @@ fn parse_outgoing(value: &Value, p: &Payment) -> LabResult<(&'static str, u64)> 
     {
         return Err("Outgoing transaction evidence did not match.");
     }
-    let destinations = v["destinations"]
-        .as_array()
-        .ok_or("Missing outgoing destination.")?;
-    if destinations.len() != 1
-        || destinations[0]["address"].as_str() != Some(p.address.as_str())
-        || destinations[0]["amount"].as_u64().map(|n| n.to_string())
-            != Some(p.amount_atomic.clone())
-    {
-        return Err("Outgoing destination did not match.");
-    }
     let confirmations = match v.get("confirmations") {
         None => 0,
         Some(n) => n.as_u64().ok_or("Invalid confirmation count.")?,
     };
+    let confirmed = v["type"] == "out"
+        && v["height"].as_u64().is_some_and(|height| height > 0)
+        && confirmations > 0;
+    match v.get("destinations") {
+        Some(Value::Array(destinations)) if !destinations.is_empty() => {
+            if destinations.len() != 1
+                || destinations[0]["address"].as_str() != Some(p.address.as_str())
+                || destinations[0]["amount"].as_u64().map(|n| n.to_string())
+                    != Some(p.amount_atomic.clone())
+            {
+                return Err("Outgoing destination did not match.");
+            }
+        }
+        // A lost daemon reply prevents Monero from saving local destination
+        // metadata. Its subsequent verified chain scan still identifies the
+        // exact transaction we prepared and journaled. The matching txid binds
+        // its signed outputs; amount, fee and safety fields were checked above.
+        // Missing metadata never establishes a pending or failed outcome.
+        None if confirmed => {}
+        Some(Value::Array(destinations)) if confirmed && destinations.is_empty() => {}
+        _ => return Err("Missing or invalid outgoing destination."),
+    }
     match v["type"].as_str() {
         Some("pending") => Ok(("Pending", 0)),
-        Some("out") if v["height"].as_u64().is_some_and(|h| h > 0) && confirmations > 0 => {
-            Ok(("Confirmed", confirmations))
-        }
+        Some("out") if confirmed => Ok(("Confirmed", confirmations)),
         Some("failed") => Ok(("Needs review", 0)),
         _ => Err("Outgoing outcome is not established."),
     }
@@ -1032,5 +1050,35 @@ mod tests {
         assert_eq!(parse_outgoing(&v, &r.payment), Ok(("Confirmed", 1)));
         v["transfer"]["amount"] = json!(101);
         assert!(parse_outgoing(&v, &r.payment).is_err());
+    }
+    #[test]
+    fn confirmed_scan_can_recover_missing_destination_metadata_after_lost_reply() {
+        let r = record();
+        // Monero commit_tx stores destinations only after the daemon's success
+        // reply. process_outgoing can later rediscover the spend from blocks
+        // with its txid, amounts and fee, but without those local destinations.
+        let confirmed = json!({"transfer":{"txid":r.payment.txid,"amount":100,"fee":10,
+            "double_spend_seen":false,"unlock_time":0,"type":"out","height":10,"confirmations":1}});
+        assert_eq!(parse_outgoing(&confirmed, &r.payment), Ok(("Confirmed", 1)));
+        let mut empty = confirmed.clone();
+        empty["transfer"]["destinations"] = json!([]);
+        assert_eq!(parse_outgoing(&empty, &r.payment), Ok(("Confirmed", 1)));
+        for (key, value) in [
+            ("txid", json!("d".repeat(64))),
+            ("amount", json!(101)),
+            ("fee", json!(11)),
+            ("unlock_time", json!(1)),
+            ("double_spend_seen", json!(true)),
+            ("height", json!(0)),
+            ("confirmations", json!(0)),
+            ("type", json!("pending")),
+            ("type", json!("failed")),
+            ("destinations", json!(null)),
+            ("destinations", json!([{"address":"wrong","amount":100}])),
+        ] {
+            let mut invalid = confirmed.clone();
+            invalid["transfer"][key] = value;
+            assert!(parse_outgoing(&invalid, &r.payment).is_err(), "{key}");
+        }
     }
 }

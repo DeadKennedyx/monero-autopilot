@@ -21,6 +21,8 @@ export function WalletSetup({network='stagenet',catalog,busy,phase,headers,requi
  const [pendingOperation,setPendingOperation]=useState<WalletOperation|null>(null),[longWait,setLongWait]=useState(false),pending=pendingOperation!==null;
  const [error,setError]=useState(''),[message,setMessage]=useState(''),[name,setName]=useState(''),[seed,setSeed]=useState(''),[height,setHeight]=useState('0'),[expected,setExpected]=useState(''),[ack,setAck]=useState(false),[backup,setBackup]=useState<Backup|null>(null),[words,setWords]=useState(['','','']);
  const mounted=useRef(true),privacyEpoch=useRef(0),active=catalog?.wallets.find(w=>w.id===catalog.active),disabled=busy||pending;
+ const errorRef=useRef<HTMLDivElement>(null);
+ useEffect(()=>{if(error){errorRef.current?.focus({preventScroll:true});errorRef.current?.scrollIntoView?.({block:'nearest'});}},[error]);
  const clear=()=>{setPin('');setBackup(null);setSeed('');setWords(['','','']);setAck(false);};
  const invalidate=()=>{void fetch('/api/wallet',{method:'POST',headers,body:JSON.stringify({action:'hide'})}).catch(()=>{});};
  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;invalidate();};},[]);
@@ -46,7 +48,7 @@ export function WalletSetup({network='stagenet',catalog,busy,phase,headers,requi
  async function verify(){const r=await request({action:'verify',challenge:backup?.challenge,words});clear();setStep('overview');if(r)setMessage('Backup words checked. Keep your written recovery phrase somewhere private.');}
  return <section className="card wallet-setup" data-testid="wallet-setup">
   <div className="setup-heading"><span className="icon-circle"><ShieldCheck size={21}/></span><div><p className="eyebrow">YOUR WALLET, YOUR RECOVERY</p><h2>{step==='create'?'Create your wallet':step==='restore'?'Restore a wallet':step==='phrase'?'Write down these 25 words':step==='verify'?'Check your written backup':step==='backup'?'Back up your wallet':'Wallets & backup'}</h2></div></div>
-  {error&&<div className="alert" role="alert">{error}</div>}{message&&<div className="notice" role="status">{message}</div>}
+  {error&&<div className="alert" role="alert" tabIndex={-1} ref={errorRef}>{error}</div>}{message&&<div className="notice" role="status">{message}</div>}
   {pendingOperation&&<div className="notice" role="status" data-testid="wallet-operation">{operationMessages[pendingOperation]}{longWait&&<p data-testid="wallet-operation-wait">Still working. Keep this window open; you do not need to submit again.</p>}</div>}
   {step!=='overview'&&<button className="text-button setup-back" disabled={pending} onClick={()=>go('overview')}><ArrowLeft size={15}/>Back to wallets</button>}
   {step==='overview'&&<>

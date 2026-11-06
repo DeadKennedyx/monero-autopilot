@@ -461,3 +461,56 @@ async fn confirmed_self_transfer_retains_stale_evidence_on_read_failure_but_bloc
     assert_eq!(f.state.reads.load(Ordering::SeqCst), 4);
     assert_eq!(f.state.prepares.load(Ordering::SeqCst), 1);
 }
+
+#[tokio::test]
+async fn rejected_review_survives_history_refresh_until_an_explicit_new_action() {
+    let f = Fixture::start().await;
+    let mut sender = f.sender();
+    let identity = "a".repeat(64);
+    sender
+        .prepare(&f.rpc, &identity, &"8".repeat(95), "0.0000000001", 1000, 1)
+        .await
+        .unwrap();
+    let id = sender.snapshot.payments[0].id.clone();
+    durable(
+        &sender.marker(&id, "attempt"),
+        b"fixture only; no broadcast",
+    )
+    .unwrap();
+    let history = json!({"out":[{"txid":"c".repeat(64),"amount":100,"fee":10,
+        "double_spend_seen":false,"unlock_time":0,
+        "destinations":[{"address":"8".repeat(95),"amount":100}],
+        "type":"out","height":10,"confirmations":12}]});
+    f.state.settings.lock().unwrap().history = Some(history.clone());
+    sender.reconcile(&f.rpc, &identity, 2).await.unwrap();
+    let rejection = sender
+        .prepare(&f.rpc, &identity, &"8".repeat(95), "0.0001", 100, 3)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        rejection,
+        "Insufficient spendable funds for the amount and network fee."
+    );
+    sender.set_error(rejection);
+    for now in 4..7 {
+        sender.reconcile(&f.rpc, &identity, now).await.unwrap();
+        assert_eq!(sender.snapshot.error.as_deref(), Some(rejection));
+        assert_eq!(sender.snapshot.payments.len(), 1);
+        assert_eq!(sender.snapshot.payments[0].status, "Confirmed");
+    }
+    sender.clear_action_error(); // Explicit Check status, not an automatic refresh.
+    sender.reconcile(&f.rpc, &identity, 7).await.unwrap();
+    assert!(sender.snapshot.error.is_none());
+    f.state.settings.lock().unwrap().history = None;
+    sender.reconcile(&f.rpc, &identity, 8).await.unwrap();
+    assert!(sender
+        .snapshot
+        .error
+        .as_deref()
+        .unwrap()
+        .contains("not currently verified"));
+    f.state.settings.lock().unwrap().history = Some(history);
+    sender.reconcile(&f.rpc, &identity, 9).await.unwrap();
+    assert!(sender.snapshot.error.is_none()); // Reconciliation errors still recover normally.
+    assert_eq!(f.state.prepares.load(Ordering::SeqCst), 1);
+}

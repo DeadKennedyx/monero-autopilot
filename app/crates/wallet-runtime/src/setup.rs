@@ -16,6 +16,16 @@ use std::{
 };
 use zeroize::{Zeroize, Zeroizing};
 
+fn backup_read_error(error: &'static str) -> &'static str {
+    match error {
+        "Local RPC query_key exceeded its deadline."
+        | "Local RPC get_address exceeded its deadline."
+        | "Local RPC is unavailable or timed out." =>
+            "Your wallet is still busy checking blocks. Wait until Overview says Wallet ready, then reveal your backup again.",
+        _ => error,
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SetupCommand {
@@ -435,10 +445,11 @@ impl WalletSetup {
                     .as_ref()
                     .ok_or("Connect your wallet before backing it up.")?
                     .rpc;
-                let phrase = rpc.recovery_phrase().await?;
+                let phrase = rpc.recovery_phrase().await.map_err(backup_read_error)?;
                 let address = rpc
-                    .call("get_address", json!({"account_index":0}), 5)
-                    .await?["address"]
+                    .call("get_address", json!({"account_index":0}), 60)
+                    .await
+                    .map_err(backup_read_error)?["address"]
                     .as_str()
                     .ok_or("Wallet address unavailable.")?
                     .to_string();
@@ -515,6 +526,20 @@ impl WalletSetup {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn backup_timeout_explains_how_to_retry_without_hiding_other_failures() {
+        for error in [
+            "Local RPC query_key exceeded its deadline.",
+            "Local RPC get_address exceeded its deadline.",
+            "Local RPC is unavailable or timed out.",
+        ] {
+            assert!(backup_read_error(error).contains("Wallet ready"));
+        }
+        assert_eq!(
+            backup_read_error("Wallet identity mismatch. Backup refused."),
+            "Wallet identity mismatch. Backup refused."
+        );
+    }
     #[test]
     fn rejects_paths_wrong_network_and_malformed_seeds() {
         for id in ["../wallets", "C:\\wallet", "", "a"] {

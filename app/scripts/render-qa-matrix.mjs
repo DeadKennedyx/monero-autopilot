@@ -1,0 +1,20 @@
+import {readFileSync,writeFileSync,mkdirSync,existsSync} from 'node:fs';
+import {resolve} from 'node:path';
+const root=resolve(import.meta.dirname,'..');
+const spec=JSON.parse(readFileSync(resolve(root,'qa/manual-matrix.json'),'utf8'));
+const folder=resolve(root,'.runtime/manual-qa/production');
+mkdirSync(folder,{recursive:true});
+const runFile=resolve(folder,'run.json');
+const run=existsSync(runFile)?JSON.parse(readFileSync(runFile,'utf8')):{candidate:null,results:{}};
+const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const counts={PASS:0,FAIL:0,BLOCKED:0,NOT_RUN:0};
+const rows=spec.cases.map(c=>{
+ const [id,area,priority,scenario,actions,expected,profile]=c,result=run.results[id]||{},status=result.status||'NOT_RUN';
+ if(!Object.hasOwn(counts,status))throw Error('Unknown QA status for '+id);
+ if(status==='PASS'&&(!result.observed||!result.build||!result.at))throw Error('Pass lacks evidence: '+id);
+ counts[status]++;
+ return `<tr data-status="${status}"><td><b>${esc(id)}</b><br>${esc(priority)}</td><td>${esc(area)}<br><small>${esc(profile)}</small></td><td><b>${esc(scenario)}</b><p>${esc(actions)}</p></td><td>${esc(expected)}</td><td><span class="status ${status}">${status.replace('_',' ')}</span><p>${esc(result.observed||'No current manual result recorded.')}</p><small>${esc(result.at||'')}${result.build?'<br>Build '+esc(result.build.slice(0,12)):''}</small></td></tr>`;
+}).join('');
+const html=`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${esc(spec.title)}</title><style>body{font:15px system-ui;margin:24px;color:#eee;background:#141517}h1{color:#ff8b3d}p{line-height:1.5}small{color:#acb0b8}table{width:100%;border-collapse:collapse}th,td{padding:14px;text-align:left;vertical-align:top;border-bottom:1px solid #36383d}thead{position:sticky;top:0;background:#202226}th:nth-child(1){width:8%}th:nth-child(2){width:12%}td p{margin:8px 0}.status{font-weight:700;padding:5px;border-radius:5px;background:#333}.PASS{background:#21543c}.FAIL{background:#7b2929}.BLOCKED{background:#6d4a1f}input,select{padding:10px;margin:12px 8px 20px 0;background:#24262a;color:white;border:1px solid #555;border-radius:6px}li{margin-bottom:8px}.summary{font-size:18px}.target{max-width:1100px}</style><h1>${esc(spec.title)}</h1><p class="target">${esc(spec.target)}</p><p class="summary">${spec.cases.length} cases · ${counts.PASS} passed · ${counts.FAIL} failed · ${counts.BLOCKED} blocked · ${counts.NOT_RUN} not run</p><p>Candidate: <code>${esc(run.candidate||'Not yet assigned')}</code></p><details><summary>Evidence and payment rules</summary><ul>${spec.rules.map(r=>'<li>'+esc(r)+'</li>').join('')}</ul></details><input id="search" placeholder="Search cases" aria-label="Search cases"><select id="status" aria-label="Status"><option value="">All statuses</option>${Object.keys(counts).map(s=>'<option>'+s+'</option>').join('')}</select><table><thead><tr><th>Case</th><th>Area / profile</th><th>Scenario and actions</th><th>Expected result</th><th>Manual evidence</th></tr></thead><tbody>${rows}</tbody></table><script>function filter(){const q=document.getElementById('search').value.toLowerCase(),s=document.getElementById('status').value;for(const row of document.querySelectorAll('tbody tr'))row.hidden=(!row.textContent.toLowerCase().includes(q))||(s&&row.dataset.status!==s)}document.getElementById('search').addEventListener('input',filter);document.getElementById('status').addEventListener('change',filter);</script></html>`;
+writeFileSync(resolve(folder,'matrix.html'),html);
+console.log(JSON.stringify({cases:spec.cases.length,counts,path:resolve(folder,'matrix.html')}));

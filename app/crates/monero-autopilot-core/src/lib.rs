@@ -2,6 +2,7 @@
 //! All time is supplied as monotonic logical ticks by the host.
 
 pub mod local_recovery;
+pub mod wallet_liveness;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Privacy {

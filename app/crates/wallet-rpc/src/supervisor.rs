@@ -524,11 +524,22 @@ impl Supervisor {
         Ok(password)
     }
     pub async fn start_wallet(&mut self) -> LabResult<()> {
-        self.start_wallet_inner(true).await
+        self.start_wallet_inner(true).await?;
+        self.resume_wallet_refresh().await
     }
     /// Recovery may only reopen existing wallet files, never create a replacement.
+    /// Refresh stays paused until the caller verifies identity and its checkpoint.
     pub async fn open_saved_wallet(&mut self) -> LabResult<()> {
         self.start_wallet_inner(false).await
+    }
+    pub async fn resume_wallet_refresh(&self) -> LabResult<()> {
+        self.wallet
+            .as_ref()
+            .ok_or("Wallet process is missing.")?
+            .rpc
+            .call("auto_refresh", json!({"enable":true,"period":5}), 10)
+            .await
+            .map(|_| ())
     }
     async fn start_wallet_inner(&mut self, allow_create: bool) -> LabResult<()> {
         if self.wallet.is_some() {
@@ -540,7 +551,8 @@ impl Supervisor {
         let daemon = self.daemon_rpc()?;
         self.start_wallet_against(&daemon, allow_create).await
     }
-    /// Used by the controlled second test wallet; no second blockchain is started.
+    /// Open with refresh paused so setup can verify and save the wallet first.
+    /// Call resume_wallet_refresh only when no startup RPC work remains.
     pub async fn start_wallet_against(
         &mut self,
         daemon: &Rpc,
@@ -606,17 +618,25 @@ impl Supervisor {
             )
             .await?,
         );
-        let result=async {
+        let result = async {
             self.wait_ready(true).await?;
-            let rpc=&self.wallet.as_ref().ok_or("Wallet process is missing.")?.rpc;
-            if let Some((seed,height)) = restore { rpc.restore_wallet(self.wallet_name(), password.as_str(), seed, height).await?; }
-            else if self.wallet_exists(){rpc.call("open_wallet",json!({"filename":self.wallet_name(),"password":password.as_str(),"autosave_current":true}),30).await?;}
-            else if allow_create{rpc.call("create_wallet",json!({"filename":self.wallet_name(),"password":password.as_str(),"language":"English"}),30).await?;}
-            else{return Err("The saved wallet is missing. It will not be replaced.");}
-            rpc.call("auto_refresh",json!({"enable":true,"period":5}),10).await?;
-            rpc.call("store",json!({}),15).await?;
-            Ok(())
-        }.await;
+            let rpc = &self
+                .wallet
+                .as_ref()
+                .ok_or("Wallet process is missing.")?
+                .rpc;
+            let initialization = if let Some((seed, height)) = restore {
+                WalletInitialization::Restore { seed, height }
+            } else if self.wallet_exists() {
+                WalletInitialization::Open
+            } else if allow_create {
+                WalletInitialization::Create
+            } else {
+                return Err("The saved wallet is missing. It will not be replaced.");
+            };
+            initialize_wallet_rpc(rpc, self.wallet_name(), password.as_str(), initialization).await
+        }
+        .await;
         if result.is_err() {
             self.stop_wallet().await;
         }
@@ -658,6 +678,48 @@ impl Supervisor {
         }
         graceful && wallet_clean
     }
+}
+
+enum WalletInitialization<'a> {
+    Open,
+    Create,
+    Restore { seed: &'a str, height: u64 },
+}
+
+async fn initialize_wallet_rpc(
+    rpc: &Rpc,
+    filename: &str,
+    password: &str,
+    initialization: WalletInitialization<'_>,
+) -> LabResult<()> {
+    // Monero starts with auto-refresh enabled. Its single RPC thread can begin
+    // a long network refresh as soon as a wallet is opened, before our next call.
+    // This command works without an open wallet, so pause BEFORE opening it.
+    rpc.call("auto_refresh", json!({"enable":false}), 10)
+        .await?;
+    match initialization {
+        WalletInitialization::Open => {
+            rpc.call(
+                "open_wallet",
+                json!({"filename":filename,"password":password,"autosave_current":true}),
+                30,
+            )
+            .await?;
+        }
+        WalletInitialization::Create => {
+            rpc.call(
+                "create_wallet",
+                json!({"filename":filename,"password":password,"language":"English"}),
+                30,
+            )
+            .await?;
+        }
+        WalletInitialization::Restore { seed, height } => {
+            rpc.restore_wallet(filename, password, seed, height).await?;
+        }
+    }
+    rpc.call("store", json!({}), 15).await?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -713,7 +775,7 @@ mod privacy_tests {
             routed.is_ok(),
             "A slow valid gateway response must not prevent wallet startup"
         );
-        assert_eq!(direct, Err("Local RPC operation exceeded its deadline."));
+        assert_eq!(direct, Err("Local RPC get_info exceeded its deadline."));
 
         let (wrong, wrong_server) = delayed_daemon(Duration::ZERO, "mainnet").await;
         let refused = check_daemon_network(&wrong, Network::Stagenet, true).await;
@@ -768,5 +830,148 @@ mod privacy_tests {
             .await
             .is_err());
         assert!(Supervisor::new(root, binaries).await.is_err());
+    }
+
+    struct RefreshingWallet {
+        opened: bool,
+        enabled: bool,
+        methods: Vec<String>,
+    }
+
+    async fn refreshing_wallet() -> (
+        Rpc,
+        std::sync::Arc<std::sync::Mutex<RefreshingWallet>>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        use axum::{
+            http::{header, HeaderMap, StatusCode},
+            response::IntoResponse,
+            routing::post,
+            Json, Router,
+        };
+        use serde_json::Value;
+        let state = std::sync::Arc::new(std::sync::Mutex::new(RefreshingWallet {
+            opened: false,
+            enabled: true, // Monero's default, including before open_wallet.
+            methods: vec![],
+        }));
+        let handler_state = state.clone();
+        let handler = move |headers: HeaderMap, Json(request): Json<Value>| {
+            let state = handler_state.clone();
+            async move {
+                if !headers.contains_key(header::AUTHORIZATION) {
+                    return (StatusCode::UNAUTHORIZED, [(header::WWW_AUTHENTICATE,
+                        "Digest realm=\"fixture\", nonce=\"fixture-nonce\", algorithm=MD5, qop=\"auth\"")]).into_response();
+                }
+                let result = {
+                    let mut wallet = state.lock().unwrap();
+                    if wallet.opened && wallet.enabled {
+                        // Model a long refresh occupying Monero's single RPC
+                        // thread. Startup calls cannot finish while it runs.
+                        None
+                    } else {
+                        let method = request["method"].as_str().unwrap();
+                        wallet.methods.push(method.to_string());
+                        match method {
+                            "auto_refresh" => wallet.enabled = request["params"]["enable"] == true,
+                            "open_wallet" | "create_wallet" | "restore_deterministic_wallet" => {
+                                wallet.opened = true
+                            }
+                            _ => (),
+                        }
+                        Some(match method {
+                            "get_address" => json!({"address":"fixture-public-address"}),
+                            "get_height" => json!({"height":123}),
+                            _ => json!({}),
+                        })
+                    }
+                };
+                match result {
+                    Some(result) => {
+                        Json(json!({"jsonrpc":"2.0","id":request["id"],"result":result}))
+                            .into_response()
+                    }
+                    None => std::future::pending().await,
+                }
+            }
+        };
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let rpc = Rpc::new(
+            listener.local_addr().unwrap(),
+            "fixture".into(),
+            "fixture".into(),
+        )
+        .unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, Router::new().route("/json_rpc", post(handler)))
+                .await
+                .unwrap();
+        });
+        (rpc, state, server)
+    }
+
+    #[tokio::test]
+    async fn wallet_startup_keeps_identity_and_store_available_until_refresh_is_resumed() {
+        for initialization in [
+            WalletInitialization::Open,
+            WalletInitialization::Create,
+            WalletInitialization::Restore {
+                seed: "isolated fixture only",
+                height: 123,
+            },
+        ] {
+            let (rpc, state, server) = refreshing_wallet().await;
+            let initialized = tokio::time::timeout(Duration::from_secs(2), async {
+                initialize_wallet_rpc(&rpc, "fixture", "fixture", initialization).await?;
+                rpc.call("get_address", json!({"account_index":0}), 1)
+                    .await?;
+                rpc.call("get_height", json!({}), 1).await?;
+                rpc.call("store", json!({}), 1).await?;
+                Ok::<_, &'static str>(())
+            })
+            .await;
+            assert_eq!(
+                initialized,
+                Ok(Ok(())),
+                "A slow refresh must not block startup identity checks or checkpointing"
+            );
+            assert!(!state.lock().unwrap().enabled);
+            assert_eq!(
+                state.lock().unwrap().methods.first().map(String::as_str),
+                Some("auto_refresh")
+            );
+            rpc.call("auto_refresh", json!({"enable":true,"period":5}), 1)
+                .await
+                .unwrap();
+            assert!(state.lock().unwrap().enabled);
+            assert!(
+                tokio::time::timeout(
+                    Duration::from_millis(100),
+                    rpc.call("get_height", json!({}), 1)
+                )
+                .await
+                .is_err(),
+                "The fixture must actually model RPC busy after background refresh starts"
+            );
+            server.abort();
+        }
+    }
+
+    #[tokio::test]
+    async fn default_refresh_reproduces_the_pre_fix_startup_contention() {
+        let (rpc, _, server) = refreshing_wallet().await;
+        rpc.call(
+            "open_wallet",
+            json!({"filename":"fixture","password":"fixture"}),
+            1,
+        )
+        .await
+        .unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), rpc.call("store", json!({}), 1))
+                .await
+                .is_err()
+        );
+        server.abort();
     }
 }

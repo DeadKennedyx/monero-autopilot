@@ -54,6 +54,30 @@ impl LocalRecovery {
         self.retry_at = None;
         self.stable_since = None;
     }
+    /// A busy wallet or unavailable route is not a valid healthy observation.
+    /// It neither spends attempts nor earns a new budget or consecutive failures.
+    pub fn defer_observation(&mut self) {
+        if matches!(self.phase, Phase::Monitoring | Phase::Suspect) {
+            self.phase = Phase::Monitoring;
+            self.failures = 0;
+            self.stable_since = None;
+        }
+    }
+    /// Automatic route replacement must retain the wallet's restart budget.
+    /// Only an explicit start or sustained valid observations replenish it.
+    pub fn reconnect(&mut self, now: u64) {
+        if !matches!(self.phase, Phase::Monitoring | Phase::Suspect) {
+            return;
+        }
+        self.failures = 0;
+        self.stable_since = None;
+        if self.attempts >= MAX_ATTEMPTS {
+            self.fail_closed();
+        } else {
+            self.phase = Phase::Waiting;
+            self.retry_at = Some(now);
+        }
+    }
     fn schedule(&mut self, now: u64) {
         self.stable_since = None;
         if self.attempts >= MAX_ATTEMPTS {
@@ -208,5 +232,40 @@ mod tests {
         p.start(100_000);
         assert!(p.begin_due(100_000));
         assert_eq!(p.attempts, 1);
+    }
+
+    #[test]
+    fn busy_observations_do_not_replenish_automatic_route_restart_budget() {
+        let mut p = connected();
+        for attempt in [2, 3] {
+            p.defer_observation();
+            p.reconnect(100_000 * u64::from(attempt));
+            assert!(p.begin_due(100_000 * u64::from(attempt)));
+            assert_eq!(p.attempts, attempt);
+            p.complete(true, 100_000 * u64::from(attempt));
+        }
+        p.defer_observation();
+        p.reconnect(1_000_000);
+        assert_eq!(p.phase, Phase::Attention);
+        assert!(!p.begin_due(u64::MAX));
+        p.start(1_000_001); // The user can still explicitly retry.
+        assert!(p.begin_due(1_000_001));
+        assert_eq!(p.attempts, 1);
+    }
+
+    #[test]
+    fn deferred_observations_break_both_stability_and_consecutive_failures() {
+        let mut p = connected();
+        assert!(!p.observe(false, 10));
+        p.defer_observation();
+        assert!(!p.observe(false, 20));
+        p.defer_observation();
+        assert!(!p.observe(true, 100_000));
+        assert_eq!(p.attempts, 1);
+        p.defer_observation();
+        assert!(!p.observe(true, 200_000));
+        assert_eq!(p.attempts, 1);
+        assert!(!p.observe(true, 200_000 + STABLE_MS));
+        assert_eq!(p.attempts, 0);
     }
 }

@@ -13,6 +13,7 @@ pub(crate) struct FixtureState {
     pub(crate) calls: Arc<AtomicUsize>,
     pub(crate) fail: Arc<AtomicBool>,
     pub(crate) headers: Arc<Mutex<Vec<axum::http::HeaderMap>>>,
+    bodies: Arc<Mutex<Vec<Vec<u8>>>>,
     pub(crate) wrong_host: Arc<Mutex<Option<String>>>,
     response_delay: Arc<Mutex<Duration>>,
 }
@@ -38,6 +39,7 @@ async fn fixture(
                 .is_some_and(|h| h.starts_with(host))
         });
     state.headers.lock().unwrap().push(headers);
+    state.bodies.lock().unwrap().push(bytes.to_vec());
     if state.fail.load(Ordering::SeqCst) {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     }
@@ -114,7 +116,7 @@ fn client() -> reqwest::Client {
         .build()
         .unwrap()
 }
-async fn signed(g: &Gateway, path: &str, body: &str) -> String {
+async fn signed(g: &Gateway, path: &str, body: impl AsRef<[u8]>) -> String {
     let response = client()
         .post(format!("http://{}{path}", g.address()))
         .body("{}")
@@ -134,17 +136,17 @@ async fn signed(g: &Gateway, path: &str, body: &str) -> String {
             user,
             password,
             path,
-            Some(body.as_bytes()),
+            Some(body.as_ref()),
         ))
         .unwrap()
         .to_string()
 }
-async fn call(g: &Gateway, path: &str, body: &str) -> reqwest::Response {
-    let auth = signed(g, path, body).await;
+async fn call(g: &Gateway, path: &str, body: impl AsRef<[u8]>) -> reqwest::Response {
+    let auth = signed(g, path, body.as_ref()).await;
     client()
         .post(format!("http://{}{path}", g.address()))
         .header(header::AUTHORIZATION, auth)
-        .body(body.to_owned())
+        .body(body.as_ref().to_vec())
         .send()
         .await
         .unwrap()
@@ -355,7 +357,9 @@ async fn read_timeout_preserves_healthy_route_but_broadcast_timeout_revokes_it()
     let g = &test.gateway;
     *test.state.response_delay.lock().unwrap() = Duration::from_millis(750);
     assert_eq!(
-        call(g, "/getblocks.bin", "{}").await.status(),
+        call(g, "/getblocks.bin", crate::block_batch::tests::request())
+            .await
+            .status(),
         StatusCode::SERVICE_UNAVAILABLE
     );
     assert!(g.status().unwrap().blocked.is_none());
@@ -377,6 +381,28 @@ async fn read_timeout_preserves_healthy_route_but_broadcast_timeout_revokes_it()
         6,
         "No automatic retries"
     );
+}
+
+#[tokio::test]
+async fn authenticated_block_reads_are_bounded_and_malformed_bodies_never_forward() {
+    let test = setup().await;
+    let original = crate::block_batch::tests::request();
+    let expected = crate::block_batch::bounded_request(&original).unwrap();
+    for path in ["/getblocks.bin", "/get_blocks.bin"] {
+        assert_eq!(
+            call(&test.gateway, path, &original).await.status(),
+            StatusCode::OK
+        );
+        assert_eq!(test.state.bodies.lock().unwrap().last(), Some(&expected));
+    }
+    let before = test.state.calls.load(Ordering::SeqCst);
+    assert_eq!(
+        call(&test.gateway, "/getblocks.bin", "{}").await.status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(test.state.calls.load(Ordering::SeqCst), before);
+    assert!(test.gateway.status().unwrap().blocked.is_none());
+    assert_eq!(test.gateway.status().unwrap().broadcast_attempts, 0);
 }
 
 #[tokio::test]

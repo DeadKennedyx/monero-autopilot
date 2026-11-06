@@ -445,6 +445,16 @@ async fn forward(shared: Arc<Shared>, request: Request) -> Response {
     let Ok((path, broadcast)) = operation(parts.uri.path(), &body) else {
         return StatusCode::FORBIDDEN.into_response();
     };
+    // Monero verifies the returned chain itself. Only reduce the requested
+    // batch size; never alter history, restore height, outputs or broadcasts.
+    let body = if matches!(path.as_str(), "/getblocks.bin" | "/get_blocks.bin") {
+        match crate::block_batch::bounded_request(&body) {
+            Some(body) => body,
+            None => return StatusCode::BAD_REQUEST.into_response(),
+        }
+    } else {
+        body.to_vec()
+    };
     {
         let Ok(mut lease) = shared.lease.lock() else {
             return StatusCode::SERVICE_UNAVAILABLE.into_response();
@@ -466,7 +476,7 @@ async fn forward(shared: Arc<Shared>, request: Request) -> Response {
     }
     let result = tokio::select! { biased;
         reason = shared.wait_for_unhealthy() => Err(reason),
-        value = shared.client.request(path, body.to_vec(), MAX_RESPONSE) => value,
+        value = shared.client.request(path, body, MAX_RESPONSE) => value,
     };
     match result {
         Ok(bytes) => (

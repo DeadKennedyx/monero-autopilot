@@ -14,7 +14,9 @@
     "test:startup": "node tests/mainnet-startup-ui.mjs",
     "test:payments": "node tests/mainnet-payments-ui.mjs",
     "test:setup": "node tests/wallet-setup-pending-ui.mjs",
-    "test": "pnpm test:amounts && pnpm test:desktop && pnpm test:startup && pnpm test:payments && pnpm test:setup"
+    "test:session": "node tests/snapshot-session-ui.mjs",
+    "test:installer": "node --test tests/installer-staging.mjs",
+    "test": "pnpm test:amounts && pnpm test:desktop && pnpm test:startup && pnpm test:payments && pnpm test:setup && pnpm test:session && pnpm test:installer"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",

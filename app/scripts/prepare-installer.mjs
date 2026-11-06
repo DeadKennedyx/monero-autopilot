@@ -1,4 +1,4 @@
-import { copyFileSync, createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { copyFileSync, createReadStream, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 
@@ -20,17 +20,30 @@ for (const [file, constant] of binaries) {
 }
 const binaryTarget = resolve(native, 'resources/monero');
 const licenseTarget = resolve(native, 'resources/licenses');
+const torLicenses = ['tor.txt', 'openssl.txt', 'libevent.txt', 'zlib.txt'];
+const allowedBinaries = new Set(manifest.map(entry => entry.file));
+const allowedLicenses = new Set(['Monero-LICENSE.txt', 'AutoPilot-LICENSE.txt', ...torLicenses]);
+function checkStaging(directory, allowed, kind) {
+  // Reject links and directories before copying, not just before bundling:
+  // an allowlisted filename must never redirect a copy outside staging.
+  if (!lstatSync(directory).isDirectory()) throw new Error(`Invalid installer ${kind} staging directory.`);
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    if (!entry.isFile() || !allowed.has(entry.name)) throw new Error(`Unexpected file in installer ${kind} staging.`);
+  }
+}
 mkdirSync(binaryTarget, { recursive: true });
 mkdirSync(licenseTarget, { recursive: true });
+checkStaging(binaryTarget, allowedBinaries, 'runtime');
+checkStaging(licenseTarget, allowedLicenses, 'license');
 // Copy only allowlisted executables and licenses. Never package .runtime,
 // wallet files, development privacy settings, or the entire source repository.
 for (const { file } of manifest) copyFileSync(resolve(source, file), resolve(binaryTarget, file));
 copyFileSync(resolve(source, 'LICENSE'), resolve(licenseTarget, 'Monero-LICENSE.txt'));
 copyFileSync(resolve(root, '../LICENSE'), resolve(licenseTarget, 'AutoPilot-LICENSE.txt'));
-for (const file of ['tor.txt', 'openssl.txt', 'libevent.txt', 'zlib.txt']) {
+for (const file of torLicenses) {
   copyFileSync(resolve(root, '.tools/tor/release/docs', file), resolve(licenseTarget, file));
 }
-const allowedBinaries = new Set(manifest.map(entry => entry.file));
-if (readdirSync(binaryTarget).some(file => !allowedBinaries.has(file))) throw new Error('Unexpected file in installer runtime staging.');
+checkStaging(binaryTarget, allowedBinaries, 'runtime');
+checkStaging(licenseTarget, allowedLicenses, 'license');
 writeFileSync(resolve(native, 'resources/runtime-manifest.json'), JSON.stringify({ monero: '0.18.5.4', binaries: manifest }, null, 2));
 console.log('Installer resources verified: two Monero executables and upstream licenses. Tor remains embedded in the app.');

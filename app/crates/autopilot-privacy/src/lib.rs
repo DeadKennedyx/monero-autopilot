@@ -4,6 +4,8 @@
 //! or wallet passwords. Policy approval is not proof of node honesty/anonymity.
 /// Maximum age of a completed node validation; wallet balances use a shorter window.
 pub const NODE_HEALTH_FRESH_SECS: u64 = 60;
+#[cfg(feature = "transport")]
+mod block_batch;
 pub mod config;
 pub mod endpoint;
 #[cfg(feature = "transport")]

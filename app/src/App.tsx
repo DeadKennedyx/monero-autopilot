@@ -41,8 +41,13 @@ function Progress({view,s,elapsed,pending,onAction,onWallets}:{view:ConnectionVi
 
 export function MainnetApp(){
   const access=useWalletSecurity(base,true);
-  const [s,setS]=useState<Snapshot|null>(null),[page,setPage]=useState<Page>('Overview');
+  const [snapshot,setS]=useState<Snapshot|null>(null),[page,setPage]=useState<Page>('Overview');
+  const [observedRevision,setObservedRevision]=useState<number|null>(null);
   const [offline,setOffline]=useState(false),[actionError,setActionError]=useState(''),[closed,setClosed]=useState(false),[pending,setPending]=useState<Action|null>(null);
+  // Unlocking creates a new session. Neither a previous balance nor a failed
+  // locked-session poll is evidence about it; await its own first observation.
+  const sessionObserved=observedRevision===access.revision.current;
+  const s=sessionObserved?snapshot:null;
   const [startupIssue,setStartupIssue]=useState<StartupIssue|null>(null),[closing,setClosing]=useState(false),[quitError,setQuitError]=useState('');
   const quitGuard=useRef(false),quitAccepted=useRef(false);
   const [,setClockTick]=useState(0),[startedAt,setStartedAt]=useState<number|null>(null);
@@ -60,17 +65,18 @@ export function MainnetApp(){
         if(!r.ok)throw Error('Snapshot unavailable');
         const data:Snapshot&{startup?:StartupIssue}=await r.json();
         if(active&&revision===access.revision.current){
+          setObservedRevision(revision);
           if(data.startup){setStartupIssue(data.startup);setS(null);setOffline(false);blocked=!closing;return;}
           access.acceptStatus(data.security);setS(data);setOffline(false);
           if(data.security&&!data.security.locked&&!chosenPage.current){setPage(data.setup?.active?'Overview':'Wallets');chosenPage.current=true;}
         }
-      }catch{if(active&&revision===access.revision.current){if(quitAccepted.current)setClosed(true);else setOffline(true);}}
+      }catch{if(active&&revision===access.revision.current){if(quitAccepted.current)setClosed(true);else{setObservedRevision(revision);setOffline(true);}}}
       finally{if(active&&!blocked)timer=setTimeout(()=>void read(),1500);}
     }
     void read();return()=>{active=false;controller.abort();clearTimeout(timer);};
   },[access.session,closing,closed]);
   useEffect(()=>{if(access.locked){setS(null);setStartedAt(null);setActionError('');chosenPage.current=false;}},[access.locked]);
-  const now=Date.now(),observed=connectionView(s,offline,now,pending==='disconnect');
+  const now=Date.now(),observed=connectionView(s,sessionObserved&&offline,now,pending==='disconnect');
   const readyKey=`${s?.setup?.active}:${s?.wallet_pid}:${s?.privacy?.recovery.generation}`;
   // Opening a cached wallet can briefly answer before its first background
   // refresh begins. Confirm continuous freshness across two refresh intervals

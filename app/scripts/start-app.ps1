@@ -56,7 +56,8 @@ if ($Headless) { $arguments += ' --headless' }
 # Start in the current user's environment, and always pass the resolved profile.
 # WMI/CIM process creation can inherit a provider environment with different
 # app-data variables even when the new process has the correct user identity.
-$created = Start-Process -FilePath $executable -ArgumentList $arguments -WorkingDirectory $projectRoot -WindowStyle Hidden -PassThru
+$windowStyle = if ($Headless) { 'Hidden' } else { 'Normal' }
+$created = Start-Process -FilePath $executable -ArgumentList $arguments -WorkingDirectory $projectRoot -WindowStyle $windowStyle -PassThru
 $ready = $null
 for ($attempt=0; $attempt -lt 150; $attempt++) {
     if (Test-Path -LiteralPath $readyPath) {

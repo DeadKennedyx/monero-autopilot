@@ -26,6 +26,13 @@ use tokio::{
 };
 
 pub const TOR_SHA256: &str = "1607d98f5d13859077b1b349c55beba76b09acc788f0431fd824d11966fb1074";
+// Historical pins stay fixed when TOR_SHA256 changes. A legacy executable
+// must be recognized before we select a newer cache; never bypass tampering
+// by silently extracting a fresh executable beside it.
+const LEGACY_BUNDLES: &[(&str, &str)] = &[(
+    "bundle-0.4.9.15",
+    "1607d98f5d13859077b1b349c55beba76b09acc788f0431fd824d11966fb1074",
+)];
 const TOR_BYTES: &[u8] = include_bytes!("../../../.tools/tor/release/tor/tor.exe");
 const LICENSES: &[(&str, &[u8])] = &[
     (
@@ -82,6 +89,14 @@ pub struct ManagedTor {
 fn digest(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
+fn regular_file_exists(path: &Path) -> LabResult<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => Ok(true),
+        Ok(_) => Err("Bundled Tor has changed. Execution refused."),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(_) => Err("Could not inspect the bundled Tor executable."),
+    }
+}
 fn checked_path(path: &Path) -> LabResult<String> {
     let value = path.to_str().ok_or("Tor cannot use this local path.")?;
     if value.contains(['\r', '\n', '"', '#']) {
@@ -94,12 +109,20 @@ fn checked_path(path: &Path) -> LabResult<String> {
 }
 /// Existing modified binaries are refused, never silently repaired or executed.
 pub fn unpack(directory: &Path) -> LabResult<PathBuf> {
-    if digest(TOR_BYTES) != TOR_SHA256 {
+    unpack_verified(directory, TOR_BYTES, TOR_SHA256)
+}
+fn unpack_verified(directory: &Path, bytes: &[u8], expected: &str) -> LabResult<PathBuf> {
+    if digest(bytes) != expected {
         return Err("Bundled Tor verification failed. Rebuild from the verified release.");
+    }
+    if let Ok(metadata) = fs::symlink_metadata(directory) {
+        if !metadata.is_dir() || metadata.file_type().is_symlink() {
+            return Err("Bundled Tor cache is not a regular directory. Execution refused.");
+        }
     }
     fs::create_dir_all(directory).map_err(|_| "Could not prepare the bundled Tor directory.")?;
     let binary = directory.join("tor.exe");
-    if !binary.exists() {
+    if !regular_file_exists(&binary)? {
         let temp = directory.join(format!("tor-{}.tmp", uuid::Uuid::new_v4().simple()));
         let result = (|| {
             let mut file = OpenOptions::new()
@@ -107,7 +130,7 @@ pub fn unpack(directory: &Path) -> LabResult<PathBuf> {
                 .create_new(true)
                 .open(&temp)
                 .map_err(|_| "Could not unpack bundled Tor.")?;
-            file.write_all(TOR_BYTES)
+            file.write_all(bytes)
                 .and_then(|_| file.sync_all())
                 .map_err(|_| "Could not save bundled Tor.")?;
             fs::rename(&temp, &binary).map_err(|_| "Could not finish unpacking bundled Tor.")
@@ -120,7 +143,7 @@ pub fn unpack(directory: &Path) -> LabResult<PathBuf> {
     let bytes = fs::read(&binary).map_err(|_| {
         "Bundled Tor is missing or blocked. Review the app installation and Windows Security."
     })?;
-    if digest(&bytes) != TOR_SHA256 {
+    if digest(&bytes) != expected {
         return Err("Bundled Tor has changed. Execution refused.");
     }
     for (name, bytes) in LICENSES {
@@ -128,6 +151,30 @@ pub fn unpack(directory: &Path) -> LabResult<PathBuf> {
             .map_err(|_| "Could not save bundled Tor license notices.")?;
     }
     Ok(binary)
+}
+fn prepare_cached_runtime(
+    root: &Path,
+    bytes: &[u8],
+    expected: &str,
+    legacy_bundles: &[(&str, &str)],
+) -> LabResult<PathBuf> {
+    if digest(bytes) != expected {
+        return Err("Bundled Tor verification failed. Rebuild from the verified release.");
+    }
+    for (directory, pin) in legacy_bundles {
+        let binary = root.join(directory).join("tor.exe");
+        if regular_file_exists(&binary)? {
+            let bytes = fs::read(&binary)
+                .map_err(|_| "Could not verify the previous bundled Tor executable.")?;
+            if digest(&bytes) != *pin {
+                return Err("Bundled Tor has changed. Execution refused.");
+            }
+        }
+    }
+    // Only executable caches are versioned. root/data and its Tor guard/state
+    // files remain at the same location through app and Tor upgrades.
+    let directory = root.join(format!("bundle-sha256-{expected}"));
+    unpack_verified(&directory, bytes, expected)
 }
 impl ManagedTor {
     /// `root` must be inside the host's current-user-only data directory.
@@ -173,8 +220,8 @@ impl ManagedTor {
         }
     }
     fn start(&mut self) -> LabResult<()> {
-        let bundle = self.root.join("bundle-0.4.9.15");
-        let binary = unpack(&bundle)?;
+        let binary = prepare_cached_runtime(&self.root, TOR_BYTES, TOR_SHA256, LEGACY_BUNDLES)?;
+        let bundle = binary.parent().ok_or("Could not locate bundled Tor.")?;
         let data = self.root.join("data");
         fs::create_dir_all(&data).map_err(|_| "Could not prepare Tor state.")?;
         let address = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
@@ -190,7 +237,7 @@ impl ManagedTor {
             .arg(&defaults)
             .arg("-f")
             .arg(&config)
-            .current_dir(&bundle)
+            .current_dir(bundle)
             .creation_flags(HIDDEN)
             .kill_on_drop(true)
             .stdin(Stdio::null())
@@ -326,19 +373,139 @@ mod tests {
         );
         assert_eq!(fs::read(exe).unwrap(), b"changed");
     }
-    #[tokio::test]
-    async fn missing_or_modified_runtime_fails_without_a_proxy_capability() {
+    #[test]
+    fn cache_upgrades_preserve_legacy_binary_and_client_state() {
         let directory = tempfile::tempdir().unwrap();
-        let bundle = directory.path().join("bundle-0.4.9.15");
-        fs::create_dir_all(&bundle).unwrap();
-        fs::write(bundle.join("tor.exe"), b"changed").unwrap();
-        let mut tor = ManagedTor::new(directory.path().into());
-        tor.begin();
-        tor.tick();
-        assert_eq!(tor.snapshot().state, TorState::Failed);
-        assert!(tor.proxy().is_none());
-        assert!(tor.snapshot().pid.is_none());
-        tor.stop().await;
-        assert_eq!(tor.snapshot().state, TorState::Stopped);
+        let root = directory.path();
+        let legacy = root.join("bundle-0.4.9.15");
+        fs::create_dir_all(&legacy).unwrap();
+        fs::write(legacy.join("tor.exe"), b"verified previous runtime").unwrap();
+        let old_pin = digest(b"verified previous runtime");
+        let legacy_pins = [("bundle-0.4.9.15", old_pin.as_str())];
+        fs::create_dir(root.join("data")).unwrap();
+        fs::write(root.join("data/state"), b"existing client guards").unwrap();
+        fs::write(root.join("data/cached-microdescs"), b"existing cache").unwrap();
+        fs::write(root.join("torrc"), b"existing configuration").unwrap();
+
+        let first_bytes = b"verified new runtime";
+        let first_pin = digest(first_bytes);
+        let first = prepare_cached_runtime(root, first_bytes, &first_pin, &legacy_pins).unwrap();
+        assert_eq!(
+            first,
+            root.join(format!("bundle-sha256-{first_pin}/tor.exe"))
+        );
+        assert_eq!(fs::read(&first).unwrap(), first_bytes);
+        assert_eq!(
+            prepare_cached_runtime(root, first_bytes, &first_pin, &legacy_pins).unwrap(),
+            first
+        );
+
+        let next_bytes = b"verified subsequent runtime";
+        let next_pin = digest(next_bytes);
+        let next = prepare_cached_runtime(root, next_bytes, &next_pin, &legacy_pins).unwrap();
+        assert_ne!(next, first);
+        assert_eq!(fs::read(&next).unwrap(), next_bytes);
+        assert_eq!(fs::read(&first).unwrap(), first_bytes);
+        assert_eq!(
+            fs::read(legacy.join("tor.exe")).unwrap(),
+            b"verified previous runtime"
+        );
+        assert_eq!(
+            fs::read(root.join("data/state")).unwrap(),
+            b"existing client guards"
+        );
+        assert_eq!(
+            fs::read(root.join("data/cached-microdescs")).unwrap(),
+            b"existing cache"
+        );
+        assert_eq!(
+            fs::read(root.join("torrc")).unwrap(),
+            b"existing configuration"
+        );
+    }
+    #[test]
+    fn unrecognized_legacy_runtime_blocks_new_cache_without_overwriting() {
+        let directory = tempfile::tempdir().unwrap();
+        let legacy = directory.path().join("bundle-0.4.9.15");
+        fs::create_dir(&legacy).unwrap();
+        fs::write(legacy.join("tor.exe"), b"unrecognized runtime").unwrap();
+        let old_pin = digest(b"verified previous runtime");
+        let new_pin = digest(b"new runtime");
+        assert_eq!(
+            prepare_cached_runtime(
+                directory.path(),
+                b"new runtime",
+                &new_pin,
+                &[("bundle-0.4.9.15", old_pin.as_str())],
+            )
+            .unwrap_err(),
+            "Bundled Tor has changed. Execution refused."
+        );
+        assert!(!directory
+            .path()
+            .join(format!("bundle-sha256-{new_pin}"))
+            .exists());
+        assert_eq!(
+            fs::read(legacy.join("tor.exe")).unwrap(),
+            b"unrecognized runtime"
+        );
+    }
+    #[test]
+    fn modified_selected_cache_is_refused_without_repair() {
+        let directory = tempfile::tempdir().unwrap();
+        let bytes = b"verified selected runtime";
+        let pin = digest(bytes);
+        let executable = prepare_cached_runtime(directory.path(), bytes, &pin, &[]).unwrap();
+        fs::write(&executable, b"modified selected runtime").unwrap();
+        assert_eq!(
+            prepare_cached_runtime(directory.path(), bytes, &pin, &[]).unwrap_err(),
+            "Bundled Tor has changed. Execution refused."
+        );
+        assert_eq!(fs::read(executable).unwrap(), b"modified selected runtime");
+    }
+    #[test]
+    fn incorrect_embedded_pin_does_not_create_a_cache() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("managed-tor");
+        assert!(
+            prepare_cached_runtime(&root, b"wrong bytes", &digest(b"expected bytes"), &[]).is_err()
+        );
+        assert!(!root.exists());
+    }
+    #[test]
+    fn non_file_executable_is_refused_without_replacing_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let bytes = b"verified runtime";
+        let pin = digest(bytes);
+        let executable = directory
+            .path()
+            .join(format!("bundle-sha256-{pin}/tor.exe"));
+        fs::create_dir_all(&executable).unwrap();
+        assert_eq!(
+            prepare_cached_runtime(directory.path(), bytes, &pin, &[]).unwrap_err(),
+            "Bundled Tor has changed. Execution refused."
+        );
+        assert!(executable.is_dir());
+        assert_eq!(fs::read_dir(executable).unwrap().count(), 0);
+    }
+    #[tokio::test]
+    async fn modified_legacy_or_current_runtime_fails_without_a_proxy_capability() {
+        for name in [
+            "bundle-0.4.9.15".to_owned(),
+            format!("bundle-sha256-{TOR_SHA256}"),
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let bundle = directory.path().join(name);
+            fs::create_dir_all(&bundle).unwrap();
+            fs::write(bundle.join("tor.exe"), b"changed").unwrap();
+            let mut tor = ManagedTor::new(directory.path().into());
+            tor.begin();
+            tor.tick();
+            assert_eq!(tor.snapshot().state, TorState::Failed);
+            assert!(tor.proxy().is_none());
+            assert!(tor.snapshot().pid.is_none());
+            tor.stop().await;
+            assert_eq!(tor.snapshot().state, TorState::Stopped);
+        }
     }
 }

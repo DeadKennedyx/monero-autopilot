@@ -133,10 +133,12 @@ pub struct RoutedClient {
 impl RoutedClient {
     pub fn new(plan: RoutePlan, cancel: CancellationToken) -> Result<Self> {
         let mut client = Self::with_deadline(plan, cancel, Duration::from_secs(25))?;
-        // Block batches and decoy output distributions can take longer over
-        // Tor than small health probes. Other JSON-RPC methods stay short.
-        // The gateway independently cancels them on expired/revoked health.
-        client.bulk_deadline = Duration::from_secs(90);
+        // Catch-up block batches can exceed ninety seconds over Tor. Cutting
+        // each attempt off at that point discards the same partial batch and
+        // prevents any scan progress. Keep a bounded three-minute bulk budget;
+        // health probes and broadcasts retain their short deadlines, and the
+        // gateway still cancels on expired/revoked health independently.
+        client.bulk_deadline = Duration::from_secs(180);
         Ok(client)
     }
     pub fn with_deadline(

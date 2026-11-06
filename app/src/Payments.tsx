@@ -68,8 +68,20 @@ export function SendPanel({snapshot:s,ready,headers,now,active=true}:Props){
  const [address,setAddress]=useState(''),[value,setValue]=useState(''),[pin,setPin]=useState(''),[approved,setApproved]=useState(false),[error,setError]=useState('');
  const [priority,setPriority]=useState<FeePriority>('automatic');
  const [waiting,setWaiting]=useState<Waiting|null>(null),[uncertain,setUncertain]=useState(false);
+ const [notice,setNotice]=useState(''),previousPreview=useRef<Payment|null>(null),noticeRef=useRef<HTMLParagraphElement>(null);
  const guard=useRef(false),alive=useRef(true);
+ const errorRef=useRef<HTMLDivElement>(null),displayError=error||s.send?.error;
+ useEffect(()=>{if(active&&displayError){errorRef.current?.focus({preventScroll:true});errorRef.current?.scrollIntoView?.({block:'nearest'});}},[active,displayError]);
  const payments=s.send?.payments||[],preview=payments.find(p=>p.status==='Preview'),latest=payments.find(p=>!['Preview','Cancelled'].includes(p.status));
+ useEffect(()=>{
+  const previous=previousPreview.current;
+  if(previous&&!preview&&waiting?.action!=='cancel'&&now/1000>=previous.expires_at&&payments.some(p=>p.id===previous.id&&p.status==='Cancelled')){
+   setAddress(previous.address);setValue(amount(previous.amount_atomic));setPriority(previous.priority||'automatic');
+   setNotice('This preview expired. Nothing was sent. Review the payment again when you are ready.');
+  }
+  previousPreview.current=preview||null;
+ },[preview,payments,now,waiting?.action]);
+ useEffect(()=>{if(active&&notice){noticeRef.current?.focus({preventScroll:true});noticeRef.current?.scrollIntoView?.({block:'nearest'});}},[active,notice]);
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
  useEffect(()=>{setPin('');setApproved(false);},[preview?.id]);
  useEffect(()=>{if(!active){setPin('');setApproved(false);}},[active]);
@@ -83,7 +95,7 @@ export function SendPanel({snapshot:s,ready,headers,now,active=true}:Props){
  },[s,waiting,preview,payments]);
  async function send(body:{action:string;address?:string;amount?:string;id?:string;pin?:string;priority?:FeePriority}){
   if(guard.current||!ready||s.busy)return;
-  if(body.action==='prepare'){const issue=inputError(body.address!,body.amount!);if(issue){setError(issue);return;}}
+  if(body.action==='prepare'){setNotice('');const issue=inputError(body.address!,body.amount!);if(issue){setError(issue);return;}}
   guard.current=true;setError('');setWaiting({action:body.action,id:body.id,baseline:s,since:Date.now()});
   try{
    const r=await fetch('/api/send',{method:'POST',headers,body:JSON.stringify(body),signal:AbortSignal.timeout(15000)}),data=await r.json();
@@ -95,9 +107,10 @@ export function SendPanel({snapshot:s,ready,headers,now,active=true}:Props){
  const invalidPreview=!!preview&&(!/^[0-9]+$/.test(preview.fee_atomic)||BigInt(preview.fee_atomic)>100_000_000n);
  return <div className="send-layout"><section className="card send-main">
   <div className="steps"><span className={!preview?'selected':''}>1 <b>Payment details</b></span><i/><span className={preview?'selected':''}>2 <b>Review & confirm</b></span></div>
-  {(error||s.send?.error||s.send?.rejected_fee)&&<div className="alert" role="alert">{error||s.send?.error}{s.send?.rejected_fee&&<p data-testid="rejected-fee">Returned network fee: <strong>{amount(s.send.rejected_fee.fee_atomic)} XMR</strong>. Maximum allowed: <strong>{amount(s.send.rejected_fee.maximum_fee_atomic)} XMR</strong>. This attempt did not send a payment.</p>}</div>}
-  {!ready&&<p className="payment-wait" role="status">Waiting for an up-to-date balance. AutoPilot will enable payments when your wallet is ready.</p>}
-  {waiting&&<p className="payment-wait" role="status">{waiting.action==='confirm'?'Submitting your payment once. Checking its status…':waiting.action==='prepare'?'Preparing your payment and its exact fee…':waiting.action==='cancel'?'Discarding this preview…':'Checking the original payment…'}{now-waiting.since>=60000?' This is taking longer than usual. No clicks needed.':''}</p>}
+  {(displayError||s.send?.rejected_fee)&&<div className="alert" role="alert" ref={errorRef} tabIndex={-1}>{displayError}{s.send?.rejected_fee&&<p data-testid="rejected-fee">Returned network fee: <strong>{amount(s.send.rejected_fee.fee_atomic)} XMR</strong>. Maximum allowed: <strong>{amount(s.send.rejected_fee.maximum_fee_atomic)} XMR</strong>. This attempt did not send a payment.</p>}</div>}
+  {notice&&<p className="payment-wait" role="status" ref={noticeRef} tabIndex={-1} data-testid="preview-expiry-notice">{notice}</p>}
+  {!ready&&!waiting&&<p className="payment-wait" role="status">Waiting for an up-to-date balance. AutoPilot will enable payments when your wallet is ready.</p>}
+  {waiting&&<p className="payment-wait" role="status">{waiting.action==='confirm'?'Submitting your payment once. Checking its status…':waiting.action==='prepare'?'Checking your balance and preparing the exact fee…':waiting.action==='cancel'?'Discarding this preview…':'Checking the original payment…'}{now-waiting.since>=60000?' This is taking longer than usual. No clicks needed.':''}</p>}
   {preview?<><button className="text-button" disabled={busy||!ready||uncertain} onClick={()=>{setAddress(preview.address);setValue(amount(preview.amount_atomic));setPriority(preview.priority||'automatic');void send({action:'cancel',id:preview.id});}}><ArrowLeft size={15}/>Edit payment</button><h2>Review your payment</h2><p className="muted">{waiting?.action==='confirm'?'Your authorization was submitted. Wait for its result below.':'Nothing has been broadcast. Check the complete address below.'}</p>
    {preview.self_transfer&&<p className="payment-wait">Self-transfer · This address belongs to your wallet. Only the network fee leaves your wallet; selected funds will temporarily lock.</p>}
    <label>RECIPIENT</label><code className="address" data-testid="preview-address">{preview.address}</code>

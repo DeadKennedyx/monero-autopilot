@@ -22,12 +22,89 @@ pub enum TransferPriority {
     Economy,
 }
 
+#[cfg(test)]
+mod backup_tests {
+    use super::*;
+    use axum::{
+        http::{header, HeaderMap, StatusCode},
+        response::IntoResponse,
+        routing::post,
+        Json, Router,
+    };
+
+    #[tokio::test]
+    async fn backup_read_waits_for_in_flight_refresh_without_retrying() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let calls = Arc::new(AtomicU64::new(0));
+        let observed = calls.clone();
+        let handler = move |headers: HeaderMap, Json(request): Json<Value>| {
+            let calls = calls.clone();
+            async move {
+                if !headers.contains_key(header::AUTHORIZATION) {
+                    return (StatusCode::UNAUTHORIZED, [(header::WWW_AUTHENTICATE,
+                        "Digest realm=\"fixture\", nonce=\"fixture-nonce\", algorithm=MD5, qop=\"auth\"")]).into_response();
+                }
+                assert_eq!(request["method"], "query_key");
+                assert_eq!(request["params"], json!({"key_type":"mnemonic"}));
+                calls.fetch_add(1, Ordering::SeqCst);
+                // Simulate Monero's shared RPC/refresh thread exceeding the old
+                // ten-second deadline. This is a synthetic, unfunded phrase.
+                tokio::time::sleep(Duration::from_secs(11)).await;
+                Json(json!({"jsonrpc":"2.0","id":request["id"],"result":{"key":vec!["fixture";25].join(" ")}})).into_response()
+            }
+        };
+        let server = tokio::spawn(async move {
+            axum::serve(listener, Router::new().route("/json_rpc", post(handler)))
+                .await
+                .unwrap();
+        });
+        let rpc = Rpc::new(address, "fixture".into(), "fixture".into()).unwrap();
+        let result = rpc.recovery_phrase().await;
+        server.abort();
+        assert_eq!(result.unwrap().split_whitespace().count(), 25);
+        assert_eq!(observed.load(Ordering::SeqCst), 1);
+        assert!(rpc
+            .call("query_key", json!({"key_type":"mnemonic"}), 1)
+            .await
+            .is_err());
+    }
+}
+
 fn wipe(value: &mut Value) {
     match value {
         Value::String(s) => s.zeroize(),
         Value::Array(a) => a.iter_mut().for_each(wipe),
         Value::Object(o) => o.values_mut().for_each(wipe),
         _ => (),
+    }
+}
+
+fn deadline_error(method: &str) -> &'static str {
+    // Only fixed operation names appear in diagnostics. Never interpolate
+    // request arguments, credentials, wallet names, addresses or recovery words.
+    match method {
+        "get_info" => "Local RPC get_info exceeded its deadline.",
+        "get_version" => "Local RPC get_version exceeded its deadline.",
+        "create_wallet" => "Local RPC create_wallet exceeded its deadline.",
+        "open_wallet" => "Local RPC open_wallet exceeded its deadline.",
+        "restore_deterministic_wallet" => {
+            "Local RPC restore_deterministic_wallet exceeded its deadline."
+        }
+        "get_height" => "Local RPC get_height exceeded its deadline.",
+        "get_address" => "Local RPC get_address exceeded its deadline.",
+        "create_address" => "Local RPC create_address exceeded its deadline.",
+        "validate_address" => "Local RPC validate_address exceeded its deadline.",
+        "get_balance" => "Local RPC get_balance exceeded its deadline.",
+        "get_transfers" => "Local RPC get_transfers exceeded its deadline.",
+        "get_transfer_by_txid" => "Local RPC get_transfer_by_txid exceeded its deadline.",
+        "auto_refresh" => "Local RPC auto_refresh exceeded its deadline.",
+        "store" => "Local RPC store exceeded its deadline.",
+        "stop_wallet" => "Local RPC stop_wallet exceeded its deadline.",
+        "transfer" => "Local RPC transfer exceeded its deadline.",
+        "relay_tx" => "Local RPC relay_tx exceeded its deadline.",
+        "query_key" => "Local RPC query_key exceeded its deadline.",
+        _ => "Local RPC operation exceeded its deadline.",
     }
 }
 
@@ -139,8 +216,12 @@ impl Rpc {
     }
     /// Deliberate backup only. Never included in status, events, or generic RPC forwarding.
     pub async fn recovery_phrase(&self) -> LabResult<Zeroizing<String>> {
+        // Monero serves RPC on the same thread as background refresh. A local
+        // read can therefore wait for an in-flight Tor scan even though it does
+        // not itself use the network. Keep the wait bounded, but allow that scan
+        // to finish instead of failing after ten seconds. Never retry the read.
         let mut result = self
-            .call_inner("query_key", json!({"key_type":"mnemonic"}), 10)
+            .call_inner("query_key", json!({"key_type":"mnemonic"}), 60)
             .await?;
         let phrase = match result["key"].take() {
             Value::String(s) => Zeroizing::new(s),
@@ -180,7 +261,16 @@ impl Rpc {
                 .map_err(|_| "Could not encode RPC request.")?,
         );
         wipe(&mut params);
-        let mut value = self.send("/json_rpc", &body, seconds).await?;
+        let mut value = self
+            .send("/json_rpc", &body, seconds)
+            .await
+            .map_err(|error| {
+                if error == "Local RPC operation exceeded its deadline." {
+                    deadline_error(method)
+                } else {
+                    error
+                }
+            })?;
         if value.get("jsonrpc").and_then(Value::as_str) != Some("2.0")
             || value.get("id").and_then(Value::as_str) != Some(id.as_str())
         {

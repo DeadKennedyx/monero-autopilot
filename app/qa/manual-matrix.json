@@ -1,0 +1,816 @@
+{
+  "title": "Monero AutoPilot — production manual QA",
+  "target": "Windows x64 Tauri desktop; Monero mainnet; owned node over bundled Tor",
+  "rules": [
+    "Exercise product flows with native computer control. A source review or automated fixture alone cannot mark a manual case passed.",
+    "Record the executable SHA-256, date, profile alias, actions, observed result and relevant transaction reference for each pass.",
+    "Keep private evidence and run results under ignored .runtime. Never commit wallet files, recovery words, PINs or financial identifiers.",
+    "Use isolated profiles for PIN changes, restore, process faults and installer tests. Preserve the funded wallet and its recovery information.",
+    "Real transfers are authorized between controlled wallets at 0.0001 XMR each, with fees no greater than 0.0001 XMR each. Record fees and outcomes; never repeat an uncertain transfer blindly.",
+    "After a fix, rebuild and retest affected cases. Production completion requires all applicable cases and release gates supported by current evidence; no skipped case counts as green.",
+    "Use controlled fault setup where necessary, but observe recovery and user actions in the actual desktop app. Describe the injected fault explicitly."
+  ],
+  "columns": [
+    "id",
+    "area",
+    "priority",
+    "scenario",
+    "actions",
+    "expected",
+    "profile"
+  ],
+  "cases": [
+    [
+      "START-01",
+      "Startup",
+      "P0",
+      "Fresh installation and first launch",
+      "Launch an isolated profile with no wallet or PIN.",
+      "Secure PIN setup appears; no existing user wallet is selected.",
+      "fresh"
+    ],
+    [
+      "START-02",
+      "Startup",
+      "P0",
+      "Saved wallet startup",
+      "Launch, unlock and wait without repeated Connect clicks; repeat three cold starts.",
+      "Correct wallet opens, scanning completes, balance becomes current; no RPC restart loop.",
+      "isolated"
+    ],
+    [
+      "START-03",
+      "Startup",
+      "P1",
+      "Ready-state stability",
+      "Watch Overview through normal refreshes and several node observations.",
+      "Wallet ready remains stable; balance does not flash blank or zero.",
+      "isolated"
+    ],
+    [
+      "START-04",
+      "Startup",
+      "P1",
+      "Slow connection presentation",
+      "Observe a real slow start or controlled delayed route past 90 seconds.",
+      "Friendly progress, elapsed time and reassurance remain truthful; no duplicate work.",
+      "isolated"
+    ],
+    [
+      "START-05",
+      "Startup",
+      "P0",
+      "Pause and resume",
+      "Pause a ready wallet; inspect saved data and disabled operations; resume.",
+      "Wallet saves, pauses and reconnects to the same identity with current balance.",
+      "isolated"
+    ],
+    [
+      "START-06",
+      "Startup",
+      "P0",
+      "Failed route and explicit retry",
+      "Temporarily make the controlled route unavailable; observe retries, restore route and click Try again.",
+      "No unapproved fallback; bounded retries, clear attention state and successful retry.",
+      "fault-isolated"
+    ],
+    [
+      "START-07",
+      "Startup",
+      "P0",
+      "Wallet process recovery",
+      "Stop only the identified empty-profile wallet RPC process; observe the desktop.",
+      "App reopens the same wallet, restores freshness and never creates or sends a payment.",
+      "fault-isolated"
+    ],
+    [
+      "START-08",
+      "Startup",
+      "P0",
+      "Tor process recovery",
+      "Interrupt only the empty-profile bundled Tor process; observe reconnect.",
+      "Wallet stays private, recovers on its permitted route and never uses direct remote RPC.",
+      "fault-isolated"
+    ],
+    [
+      "START-09",
+      "Startup",
+      "P0",
+      "Duplicate profile launch",
+      "Try to launch a second desktop instance against the isolated active profile.",
+      "Second instance gives actionable protection; first wallet and files remain intact.",
+      "isolated"
+    ],
+    [
+      "START-10",
+      "Startup",
+      "P0",
+      "Unlocked graceful shutdown",
+      "Save & quit while unlocked; reopen and unlock.",
+      "Owned processes close; selected wallet, balances and history persist.",
+      "isolated"
+    ],
+    [
+      "START-11",
+      "Startup",
+      "P0",
+      "Locked graceful shutdown",
+      "Lock, then Save & quit; reopen.",
+      "Shutdown succeeds and next launch remains locked.",
+      "isolated"
+    ],
+    [
+      "START-12",
+      "Startup",
+      "P0",
+      "Native Close button",
+      "Close with the title-bar X while connected, then reopen.",
+      "Wallet is saved and owned processes stop; no corrupt or abandoned active session.",
+      "isolated"
+    ],
+    [
+      "START-13",
+      "Startup",
+      "P0",
+      "Alive but unresponsive wallet recovery",
+      "After an isolated empty wallet becomes synchronized, suspend only its identified wallet RPC process; keep ordinary UI activity and observe the response watchdog and recovery.",
+      "After the bounded unresponsive interval and failed observations, the old process closes and the same wallet reopens; current balance returns and no payment is created or repeated.",
+      "fault-isolated"
+    ],
+    [
+      "PIN-01",
+      "PIN",
+      "P0",
+      "PIN input constraints",
+      "Type letters, fewer than four digits, four digits, six digits and more than six.",
+      "Only digits accepted; 4–6 digits required and maximum enforced.",
+      "fresh"
+    ],
+    [
+      "PIN-02",
+      "PIN",
+      "P0",
+      "PIN confirmation mismatch",
+      "Submit different initial PIN entries.",
+      "Clear refusal and cleared fields; protection is not configured incorrectly.",
+      "fresh"
+    ],
+    [
+      "PIN-03",
+      "PIN",
+      "P0",
+      "PIN setup and correct unlock",
+      "Create a disposable PIN; lock and unlock with it.",
+      "Only the correct PIN opens the wallet.",
+      "isolated"
+    ],
+    [
+      "PIN-04",
+      "PIN",
+      "P0",
+      "Wrong PIN and backoff",
+      "Attempt several wrong PINs, observe countdown, then use the correct PIN.",
+      "No wallet data revealed; retry delay enforced; valid access recovers.",
+      "isolated"
+    ],
+    [
+      "PIN-05",
+      "PIN",
+      "P0",
+      "Header Lock wallet",
+      "Click header lock from a populated page.",
+      "Wallet and sensitive fields immediately disappear.",
+      "isolated"
+    ],
+    [
+      "PIN-06",
+      "PIN",
+      "P0",
+      "Settings Lock now",
+      "Use Settings Lock now, then unlock.",
+      "Same protection and clearing as the header action.",
+      "isolated"
+    ],
+    [
+      "PIN-07",
+      "PIN",
+      "P0",
+      "Actual five-minute idle lock",
+      "Unlock and leave input untouched for more than five minutes; inspect before and after.",
+      "App automatically locks after the configured interval without a test clock shortcut.",
+      "isolated"
+    ],
+    [
+      "PIN-08",
+      "PIN",
+      "P0",
+      "Restart always locks",
+      "Save & quit while unlocked; reopen the same profile.",
+      "No balance or wallet detail appears before PIN authorization.",
+      "isolated"
+    ],
+    [
+      "PIN-09",
+      "PIN",
+      "P0",
+      "Change PIN validation",
+      "Submit wrong current PIN and mismatched new entries separately.",
+      "Both refused; fields cleared; previous PIN still valid.",
+      "isolated"
+    ],
+    [
+      "PIN-10",
+      "PIN",
+      "P0",
+      "Change PIN persistence",
+      "Change PIN successfully; test old and new PINs, then restart.",
+      "Immediate lock; old PIN rejected; new PIN works before and after restart.",
+      "isolated"
+    ],
+    [
+      "PIN-11",
+      "PIN",
+      "P0",
+      "PIN field privacy",
+      "Populate unlock/change PIN fields; switch to a non-browser window and return.",
+      "PIN inputs clear on focus loss; no clear-text PIN is shown.",
+      "isolated"
+    ],
+    [
+      "PIN-12",
+      "PIN",
+      "P1",
+      "PIN recovery explanation",
+      "Open and close Forgot your PIN/About PIN recovery.",
+      "Explanation is readable and offers no bypass or destructive reset.",
+      "isolated"
+    ],
+    [
+      "WAL-01",
+      "Wallets",
+      "P0",
+      "Create validation",
+      "Try blank/whitespace names and a name exceeding the length limit.",
+      "Invalid name cannot create a wallet; limit is enforced.",
+      "isolated"
+    ],
+    [
+      "WAL-02",
+      "Wallets",
+      "P0",
+      "Create and progress",
+      "Create a named wallet; observe pending feedback and try repeat submission.",
+      "One wallet created, clear operation text, no duplicate submission, correct selection.",
+      "isolated"
+    ],
+    [
+      "WAL-03",
+      "Wallets",
+      "P1",
+      "Long operation reassurance",
+      "Observe create/open/restore exceeding 30 seconds using a controlled delay if needed.",
+      "Operation-specific text and still-working guidance remain visible and accurate.",
+      "fault-isolated"
+    ],
+    [
+      "WAL-04",
+      "Wallets",
+      "P0",
+      "Multiple independent wallets",
+      "Create a second distinct wallet; switch between both.",
+      "Selected name, primary address, receiving address, balances and history follow the wallet.",
+      "isolated"
+    ],
+    [
+      "WAL-05",
+      "Wallets",
+      "P0",
+      "Wallet draft isolation",
+      "Fill a Send draft, navigate away/back, then switch wallets.",
+      "Draft retained for same wallet; no recipient, preview, PIN or stale balance crosses wallet identity.",
+      "isolated"
+    ],
+    [
+      "BACK-01",
+      "Backup",
+      "P0",
+      "Acknowledgment and PIN gate",
+      "Try reveal without acknowledgment and with incorrect PIN; then correct PIN.",
+      "No phrase until both acknowledgment and valid PIN; errors clear PIN.",
+      "isolated"
+    ],
+    [
+      "BACK-02",
+      "Backup",
+      "P0",
+      "Recovery information",
+      "Reveal the empty test wallet backup and retain it privately for restore testing.",
+      "Exactly 25 ordered words, restore height and matching primary address; no secrets logged in source or shared evidence.",
+      "isolated"
+    ],
+    [
+      "BACK-03",
+      "Backup",
+      "P0",
+      "Phrase clears on window loss",
+      "Reveal, switch to a non-browser app, then return.",
+      "Phrase hidden; another PIN-authorized reveal is required.",
+      "isolated"
+    ],
+    [
+      "BACK-04",
+      "Backup",
+      "P0",
+      "Phrase timeout",
+      "Reveal and wait 60 seconds without navigating.",
+      "Phrase is hidden automatically with clear feedback.",
+      "isolated"
+    ],
+    [
+      "BACK-05",
+      "Backup",
+      "P0",
+      "Backup challenge rejection",
+      "Enter wrong requested words and submit.",
+      "Backup not marked verified; challenge consumed and secret fields cleared.",
+      "isolated"
+    ],
+    [
+      "BACK-06",
+      "Backup",
+      "P0",
+      "Backup challenge success",
+      "Reveal again and correctly answer all requested word positions.",
+      "Backup words checked persists across navigation and restart.",
+      "isolated"
+    ],
+    [
+      "BACK-07",
+      "Backup",
+      "P0",
+      "Challenge clearing",
+      "Partly fill challenge, switch windows; repeat and wait its 120-second expiry.",
+      "Challenge and typed words disappear on blur and timeout.",
+      "isolated"
+    ],
+    [
+      "REST-01",
+      "Restore",
+      "P0",
+      "Phrase validation",
+      "Submit short/24-word and nonalphabetic recovery input.",
+      "Clear refusal; seed cleared; existing wallet catalog unchanged.",
+      "isolated"
+    ],
+    [
+      "REST-02",
+      "Restore",
+      "P0",
+      "Height boundaries",
+      "Use negative, fractional and future restore heights.",
+      "Invalid height rejected with actionable feedback; no wallet replacement.",
+      "isolated"
+    ],
+    [
+      "REST-03",
+      "Restore",
+      "P0",
+      "Optional address validation",
+      "Try malformed and valid-but-wrong expected primary addresses.",
+      "Malformed or mismatching identity refused; previous selection restored safely.",
+      "isolated"
+    ],
+    [
+      "REST-04",
+      "Restore",
+      "P0",
+      "Successful restoration",
+      "Restore the controlled wallet from its backup and recorded height/address.",
+      "Separate wallet entry selected; primary address matches; funds/history from chain are recovered.",
+      "controlled-funded"
+    ],
+    [
+      "REST-05",
+      "Restore",
+      "P0",
+      "Restore privacy clearing",
+      "Populate recovery words; switch windows or navigate away before submitting.",
+      "Recovery field clears; no secret retained in another page or logs.",
+      "isolated"
+    ],
+    [
+      "REST-06",
+      "Restore",
+      "P0",
+      "Restore and selection persistence",
+      "Switch original/restored/independent wallets and restart with restored wallet selected.",
+      "Identity and selected catalog entry remain correct; original wallets preserved.",
+      "controlled-funded"
+    ],
+    [
+      "REC-01",
+      "Receive",
+      "P0",
+      "Receive address and QR display",
+      "Open Receive for a ready wallet.",
+      "Complete correct mainnet address, address index and readable QR displayed.",
+      "isolated"
+    ],
+    [
+      "REC-02",
+      "Receive",
+      "P0",
+      "Independent QR decoding",
+      "Capture the visible QR and decode offline with an independent decoder; compare to displayed address.",
+      "Payload exactly monero:<displayed address>, with no truncation or wrong wallet.",
+      "isolated"
+    ],
+    [
+      "REC-03",
+      "Receive",
+      "P0",
+      "Copy address",
+      "Click Copy address, paste manually into a test field and compare.",
+      "Clipboard matches the complete displayed address exactly; feedback is accurate.",
+      "isolated"
+    ],
+    [
+      "REC-04",
+      "Receive",
+      "P0",
+      "New address and stale-copy regression",
+      "Copy current address, create another, inspect feedback, decode QR and copy/paste again.",
+      "Index/address/QR change together; copied feedback resets; new clipboard value matches.",
+      "isolated"
+    ],
+    [
+      "REC-05",
+      "Receive",
+      "P0",
+      "Address creation repeat guard",
+      "Attempt a second click while a new address is being created.",
+      "One acknowledged creation, truthful progress and no unintended duplicate addresses.",
+      "isolated"
+    ],
+    [
+      "REC-06",
+      "Receive",
+      "P0",
+      "Real incoming payment",
+      "Send 0.0001 XMR from the existing funded wallet to the controlled test wallet.",
+      "Recipient detects payment, reports exact amount and updates activity/balance after confirmation.",
+      "controlled-funded"
+    ],
+    [
+      "REC-07",
+      "Receive",
+      "P0",
+      "Old address remains valid",
+      "After creating a newer receiving address, send a small authorized payment to the previous one.",
+      "Same wallet receives the exact payment at its older address.",
+      "controlled-funded"
+    ],
+    [
+      "REC-08",
+      "Receive",
+      "P0",
+      "Locked-to-unlocked funds",
+      "Observe received funds through confirmation and required unlock blocks.",
+      "Confirmed, locked and spendable amounts reconcile; locked funds cannot be spent early.",
+      "controlled-funded"
+    ],
+    [
+      "REC-09",
+      "Receive",
+      "P1",
+      "Paused address usability",
+      "Pause connection, inspect Receive and copy the saved address.",
+      "Saved address stays usable; new address creation and sending are disabled until current.",
+      "isolated"
+    ],
+    [
+      "SEND-01",
+      "Payments",
+      "P0",
+      "Recipient validation",
+      "Try malformed, wrong-network, checksum-invalid and whitespace-padded valid addresses.",
+      "Bad destinations refused; surrounding whitespace handled; full valid identity preserved.",
+      "isolated"
+    ],
+    [
+      "SEND-02",
+      "Payments",
+      "P0",
+      "Amount validation and exact precision",
+      "Try zero, negative, exponent, comma decimal, more than 12 decimals and above 0.01 XMR.",
+      "Each invalid amount rejected without rounding or sending; valid atomic precision preserved.",
+      "isolated"
+    ],
+    [
+      "SEND-03",
+      "Payments",
+      "P0",
+      "Insufficient funds",
+      "Review a valid 0.0001 XMR payment from a known-empty wallet.",
+      "Clear insufficient-funds result; form recovers and nothing broadcasts.",
+      "isolated"
+    ],
+    [
+      "SEND-04",
+      "Payments",
+      "P0",
+      "Exact fee preview",
+      "Prepare an authorized 0.0001 XMR payment from funded wallet.",
+      "Full destination, exact amount, fee and total shown before any broadcast.",
+      "controlled-funded"
+    ],
+    [
+      "SEND-05",
+      "Payments",
+      "P1",
+      "Fee preferences",
+      "Prepare/review Automatic and Economy separately.",
+      "Selection retained, appropriate preference shown, fresh exact fee shown each time.",
+      "controlled-funded"
+    ],
+    [
+      "SEND-06",
+      "Payments",
+      "P0",
+      "Fee ceiling",
+      "Exercise a controlled over-ceiling fee response in a native isolated test environment.",
+      "Fee and maximum explained; authorization impossible; no broadcast.",
+      "fault-isolated"
+    ],
+    [
+      "SEND-07",
+      "Payments",
+      "P0",
+      "Edit or cancel preview",
+      "Use Edit payment, change details and prepare again.",
+      "Old preview invalidated; new recipient/amount/fee require fresh approval.",
+      "controlled-funded"
+    ],
+    [
+      "SEND-08",
+      "Payments",
+      "P0",
+      "Preview expiry",
+      "Allow a real preview to expire, then try authorization and edit it.",
+      "Expired payment cannot be sent; new preview can be prepared explicitly.",
+      "controlled-funded"
+    ],
+    [
+      "SEND-09",
+      "Payments",
+      "P0",
+      "Payment approval gates",
+      "Try missing checkbox, missing PIN and wrong PIN on a valid preview.",
+      "No broadcast; correct error/backoff and cleared authorization fields.",
+      "controlled-funded"
+    ],
+    [
+      "SEND-10",
+      "Payments",
+      "P0",
+      "Authorization clearing",
+      "Populate payment PIN and checkbox; navigate away, switch windows and lock in separate checks.",
+      "PIN/approval do not survive changes of view, focus or lock.",
+      "controlled-funded"
+    ],
+    [
+      "SEND-11",
+      "Payments",
+      "P0",
+      "Real outgoing payment",
+      "Confirm a reviewed 0.0001 XMR transfer to a controlled wallet within the fee cap.",
+      "One payment submitted; txid and pending state appear; total funds/fee reconcile.",
+      "controlled-funded"
+    ],
+    [
+      "SEND-12",
+      "Payments",
+      "P0",
+      "Duplicate-click protection",
+      "Attempt repeat confirmation while the authorized transfer is submitting.",
+      "Exactly one transaction for that approval; no duplicate debit or automatic new payment.",
+      "controlled-funded"
+    ],
+    [
+      "SEND-13",
+      "Payments",
+      "P0",
+      "Uncertain broadcast recovery",
+      "Use controlled response interruption after submitting one authorized payment; reconnect/check status.",
+      "App reconciles original txid; never blindly sends again; unresolved state blocks new preparation.",
+      "controlled-funded-fault"
+    ],
+    [
+      "SEND-14",
+      "Payments",
+      "P0",
+      "Restart with pending payment",
+      "Gracefully restart after a real payment is submitted but before confirmation.",
+      "Journal restores original payment; no duplicate; live status advances after unlock.",
+      "controlled-funded"
+    ],
+    [
+      "SEND-15",
+      "Payments",
+      "P0",
+      "Self-transfer",
+      "Send 0.0001 XMR to an address belonging to the same wallet.",
+      "Preview/history identify self-transfer; only fee is net loss; temporary fund lock explained.",
+      "controlled-funded"
+    ],
+    [
+      "SEND-16",
+      "Payments",
+      "P0",
+      "Return transfer",
+      "After incoming funds unlock, send 0.0001 XMR from test wallet back to original controlled wallet when balance covers fee.",
+      "Both outgoing and receiving directions work; balances and fees reconcile.",
+      "controlled-funded"
+    ],
+    [
+      "SEND-17",
+      "Payments",
+      "P0",
+      "Payment check status",
+      "Use Check status on pending and confirmed payments, including after restart.",
+      "Fresh confirmation count and status shown for original transaction; no resubmission.",
+      "controlled-funded"
+    ],
+    [
+      "SEND-18",
+      "Payments",
+      "P0",
+      "Review failure remains readable",
+      "Reject a preparation on a wallet with prior confirmed payments; wait through background status refreshes.",
+      "Error remains visible and in view until the next explicit action; no broadcast or duplicate payment.",
+      "controlled-funded"
+    ],
+    [
+      "ACT-01",
+      "Activity",
+      "P1",
+      "Empty filters",
+      "Click and keyboard-select All, Received and Sent on empty wallet.",
+      "Correct empty states, no stale rows.",
+      "isolated"
+    ],
+    [
+      "ACT-02",
+      "Activity",
+      "P0",
+      "Real history filters and order",
+      "Review both sent and received real payments in each filter.",
+      "Correct direction, amount, date, confirmations and descending order.",
+      "controlled-funded"
+    ],
+    [
+      "ACT-03",
+      "Activity",
+      "P0",
+      "Transaction ID disclosure and copy",
+      "Expand a transaction, copy ID and manually paste into a comparison field.",
+      "Complete txid matches the original payment reference; feedback targets correct row.",
+      "controlled-funded"
+    ],
+    [
+      "ACT-04",
+      "Activity",
+      "P0",
+      "Self-transfer history",
+      "Inspect completed self-transfer under All and Sent.",
+      "Net cost shown as fee; no misleading double incoming/outgoing credit.",
+      "controlled-funded"
+    ],
+    [
+      "ACT-05",
+      "Activity",
+      "P0",
+      "History persistence and wallet scope",
+      "Restart and switch among independent and restored wallets.",
+      "Correct local history retained/scoped; restored chain history is not falsely presented as copied local metadata.",
+      "controlled-funded"
+    ],
+    [
+      "UI-01",
+      "Desktop UI",
+      "P1",
+      "Navigation and shortcuts",
+      "Visit all seven tabs, logo, Overview Receive/Send shortcuts and empty-wallet setup links.",
+      "Each opens correct page; no stale wallet data or unexpected external page.",
+      "isolated"
+    ],
+    [
+      "UI-02",
+      "Desktop UI",
+      "P1",
+      "Keyboard operation",
+      "Use Tab, Shift+Tab, Enter and Space through forms, selectors and disclosures.",
+      "Visible focus, logical order and no focusable hidden-page controls.",
+      "isolated"
+    ],
+    [
+      "UI-03",
+      "Desktop UI",
+      "P1",
+      "Minimum/normal/maximized sizing",
+      "Resize to minimum and around layout breakpoints; maximize/restore; inspect every tab.",
+      "Navigation, QR, full addresses, inputs and bottom actions remain reachable without clipping.",
+      "isolated"
+    ],
+    [
+      "UI-04",
+      "Desktop UI",
+      "P1",
+      "Brand and readable states",
+      "Inspect lock, progress, ready, error, empty and payment screens.",
+      "Monero palette/Pip present; text and focus readable; errors actionable.",
+      "isolated"
+    ],
+    [
+      "UI-05",
+      "Desktop UI",
+      "P1",
+      "Long identifiers and labels",
+      "Use maximum name length and inspect full addresses/txids in normal and narrow layouts.",
+      "Content wraps or scrolls without hiding critical values/actions.",
+      "isolated"
+    ],
+    [
+      "REL-01",
+      "Release",
+      "P0",
+      "Exact candidate installer",
+      "Build the final candidate, record hash and manually install into an isolated directory.",
+      "Installer contains only approved runtime/assets/licenses; installed binary matches tested candidate.",
+      "installer"
+    ],
+    [
+      "REL-02",
+      "Release",
+      "P0",
+      "Installed launch without development folder",
+      "Launch installed app from its shortcut/independent working directory using isolated data.",
+      "Bundled Tor and Monero work; no dependency on source checkout or .tools.",
+      "installer"
+    ],
+    [
+      "REL-03",
+      "Release",
+      "P0",
+      "Upgrade preserves wallet data",
+      "Install upgrade over a controlled previous version, reopen test wallet.",
+      "PIN, selected wallet, backup status and history preserved; no replacement wallet.",
+      "installer"
+    ],
+    [
+      "REL-04",
+      "Release",
+      "P0",
+      "Uninstall preserves wallet data",
+      "Uninstall only the isolated test installation, reinstall and reopen its profile.",
+      "Application removed cleanly; wallet recovery/data remains intact.",
+      "installer"
+    ],
+    [
+      "REL-05",
+      "Release",
+      "P0",
+      "Clean supported Windows environment",
+      "Install and exercise setup, Tor connection and receive/send smoke on a clean supported Windows account/VM.",
+      "Prerequisites and WebView bootstrap work without developer tools; no unexplained security bypass needed.",
+      "clean-windows"
+    ],
+    [
+      "REL-06",
+      "Release",
+      "P0",
+      "Authenticode and release identity",
+      "Verify final EXE/installer signature, publisher, timestamp, version and checksums.",
+      "Valid production signing identity and metadata; final signed artifact is the tested one.",
+      "release-evidence"
+    ],
+    [
+      "REL-07",
+      "Release",
+      "P0",
+      "Data and secret isolation",
+      "Inspect candidate contents and native lock/recovery paths with supplementary filesystem/network evidence.",
+      "No test wallets, PINs, phrases, credentials or private reports bundled; sensitive runtime files protected.",
+      "release-evidence"
+    ],
+    [
+      "REL-08",
+      "Release",
+      "P0",
+      "Final regression audit",
+      "Review every matrix row against the final candidate and rerun cases invalidated by later changes.",
+      "All applicable cases have direct evidence; zero unresolved critical/major defects; no automated-only manual passes.",
+      "final-candidate"
+    ]
+  ]
+}
