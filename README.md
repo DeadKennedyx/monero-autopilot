@@ -12,3 +12,5 @@ See [app/README.md](app/README.md) for development and installer instructions, a
 This repository contains product source. Standalone component prototypes, wallet files, credentials, runtime downloads and generated QA reports are excluded. Downloadable installers are separate release artifacts.
 
 License: [MIT](LICENSE). Bundled upstream components retain their respective licenses.
+
+Visit [moneroautopilot.com](https://moneroautopilot.com) for the app, or [support the node](https://moneroautopilot.com/donate.html) with an optional XMR donation toward hosting costs.

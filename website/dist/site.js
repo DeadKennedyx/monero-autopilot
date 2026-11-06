@@ -50,3 +50,21 @@ privacyDialog?.addEventListener('click', event => {
   const rect = privacyDialog.getBoundingClientRect();
   if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) privacyDialog.close();
 });
+
+const donationCopy = document.querySelector('[data-copy-donation]');
+donationCopy?.addEventListener('click', async () => {
+  const address = document.querySelector('#donation-address');
+  const status = document.querySelector('#donation-copy-status');
+  if (!address || !status) return;
+  try {
+    await navigator.clipboard.writeText(address.textContent.trim());
+    status.textContent = 'Address copied. Paste it into your Monero wallet.';
+  } catch {
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(address);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    status.textContent = 'Copy was unavailable. The address is selected so you can copy it manually.';
+  }
+});
