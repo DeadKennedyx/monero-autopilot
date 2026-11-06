@@ -4,6 +4,8 @@ Monero mainnet desktop wallet built with Tauri 2, React, TypeScript, and Rust. T
 
 [Windows download](https://moneroautopilot.com/downloads.html) · [Build instructions](app/README.md) · [Contributions](#contributions-welcome) · [Node donations](#node-donations)
 
+The wallet disconnects if the approved node or the tor connection are lost, to ensure privacy is preserved
+
 ## Screenshots
 
 Overview: confirmed and available balances, connection progress, and backup status.
