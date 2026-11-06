@@ -1,0 +1,17 @@
+{
+  "product": "Monero AutoPilot",
+  "version": "0.9.0",
+  "release": "0.9.0-preview.1",
+  "channel": "preview",
+  "platform": "windows-x86_64",
+  "network": "mainnet",
+  "sourceCommit": "b99956230eb4fdce5791f990b4840f1d76ad3dcb",
+  "filename": "Monero-AutoPilot-0.9.0-windows-x64-setup.exe",
+  "url": "https://downloads.moneroautopilot.com/releases/0.9.0-preview.1/Monero-AutoPilot-0.9.0-windows-x64-setup.exe",
+  "sizeBytes": 19449515,
+  "sha256": "00849123a174781be4c4c9aa38ad2cf9fd98044f58385387047a96d5aac05f2e",
+  "authenticode": "unsigned",
+  "maximumPaymentXmr": "0.01",
+  "maximumNetworkFeeXmr": "0.0001",
+  "releaseChecksPending": ["code signing", "clean Windows installation", "upgrade and uninstall verification", "final release audit"]
+}
